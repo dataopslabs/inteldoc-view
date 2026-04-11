@@ -1,0 +1,442 @@
+name: Deploy
+
+# G6-19 + G6-20: Production-grade deploy pipeline with:
+#   - Staging gate before production (G6-19)
+#   - Readiness smoke tests after each deploy (G6-19)
+#   - Auto-rollback on production failure (G6-19)
+#   - Slack deploy notifications (G6-20)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: 'Stack to deploy (leave empty for all stacks)'
+        required: false
+        default: ''
+      environment:
+        description: 'Target environment'
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel in-progress deploys to avoid partial state
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: us-east-1
+  CDK_DEFAULT_REGION: us-east-1
+
+jobs:
+  # ── Build all artifacts ────────────────────────────────────────────────────
+  build:
+    name: Build Artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build API Lambda
+        working-directory: api
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload API dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-dist
+          path: api/dist/
+          retention-days: 1
+
+  # ── Deploy to Staging ──────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy → Staging
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      api_url: ${{ steps.api-url.outputs.api_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Download API dist
+        uses: actions/download-artifact@v4
+        with:
+          name: api-dist
+          path: api/dist/
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: npm ci
+
+      - name: Configure AWS credentials (OIDC) — staging
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.STAGING_AWS_DEPLOY_ROLE_ARN || secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK bootstrap (idempotent)
+        working-directory: infra
+        run: npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Deploy all stacks → staging
+        id: cdk-deploy-staging
+        working-directory: infra
+        run: |
+          npx cdk deploy --all \
+            --require-approval never \
+            --outputs-file cdk-outputs-staging.json \
+            --context env=staging
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          DOCLING_SERVICE_URL: ${{ secrets.DOCLING_SERVICE_URL }}
+
+      - name: Extract staging API URL
+        id: api-url
+        run: |
+          API_URL=$(cat infra/cdk-outputs-staging.json | python3 -c \
+            "import sys, json; data=json.load(sys.stdin); \
+             url=next((v.get('ApiEndpointUrl','') for v in data.values() if 'ApiEndpointUrl' in v), ''); \
+             print(url)")
+          echo "api_url=${API_URL:-${{ vars.STAGING_API_URL }}}" >> $GITHUB_OUTPUT
+
+      - name: Upload staging outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-outputs-staging
+          path: infra/cdk-outputs-staging.json
+
+      - name: Notify Slack — staging deploy
+        if: always()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && ':rocket:' || ':x:' }} *Staging Deploy ${{ job.status == 'success' && 'complete' || 'FAILED' }}*",
+              "attachments": [{
+                "color": "${{ job.status == 'success' && 'good' || 'danger' }}",
+                "fields": [
+                  { "title": "Commit", "value": "<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>", "short": true },
+                  { "title": "Author", "value": "${{ github.actor }}", "short": true }
+                ]
+              }]
+            }
+
+  # ── Staging Readiness Smoke Tests (G6-19 gate) ────────────────────────────
+  smoke-staging:
+    name: Smoke Tests → Staging
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    steps:
+      - name: Wait for staging to stabilize
+        run: sleep 20
+
+      - name: Smoke test — liveness probe
+        run: |
+          API="${{ needs.deploy-staging.outputs.api_url }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${API}v1/health")
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Liveness probe FAILED: HTTP $STATUS"
+            exit 1
+          fi
+          echo "✅ Liveness probe: HTTP $STATUS"
+
+      - name: Smoke test — readiness probe
+        id: readiness
+        run: |
+          API="${{ needs.deploy-staging.outputs.api_url }}"
+          RESPONSE=$(curl -s "${API}v1/health/ready")
+          STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "unknown")
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          if [ "$STATUS" != "ready" ] && [ "$STATUS" != "degraded" ]; then
+            echo "❌ Readiness probe FAILED: status=$STATUS"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+          echo "✅ Readiness probe: $STATUS"
+
+      - name: Notify Slack — staging smoke tests
+        if: always()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && ':white_check_mark:' || ':x:' }} *Staging Smoke Tests ${{ job.status == 'success' && 'PASSED' || 'FAILED' }}*",
+              "attachments": [{
+                "color": "${{ job.status == 'success' && 'good' || 'danger' }}",
+                "fields": [
+                  { "title": "Readiness", "value": "${{ steps.readiness.outputs.status || 'unknown' }}", "short": true },
+                  { "title": "Commit", "value": "<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>", "short": true }
+                ]
+              }]
+            }
+
+  # ── Deploy to Production ───────────────────────────────────────────────────
+  deploy-production:
+    name: Deploy → Production
+    runs-on: ubuntu-latest
+    needs: [smoke-staging]
+    # Only auto-deploy to production on push to main; manual dispatch uses the input
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://docops.dataopslabs.com
+
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      api_url: ${{ steps.api-url-prod.outputs.api_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Download API dist
+        uses: actions/download-artifact@v4
+        with:
+          name: api-dist
+          path: api/dist/
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: npm ci
+
+      - name: Configure AWS credentials (OIDC) — production
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Notify Slack — production deploy starting
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": ":building_construction: *Production Deploy Starting*",
+              "attachments": [{
+                "color": "warning",
+                "fields": [
+                  { "title": "Commit", "value": "<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>", "short": true },
+                  { "title": "Triggered by", "value": "${{ github.actor }}", "short": true }
+                ]
+              }]
+            }
+
+      - name: CDK bootstrap (idempotent)
+        working-directory: infra
+        run: npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Deploy Database Stack
+        working-directory: infra
+        run: npx cdk deploy DocOpsDatabase --require-approval never --outputs-file cdk-outputs-db.json
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          DOCLING_SERVICE_URL: ${{ secrets.DOCLING_SERVICE_URL }}
+
+      - name: Deploy Auth Stack
+        working-directory: infra
+        run: npx cdk deploy DocOpsAuth --require-approval never
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Deploy Processing Stack
+        working-directory: infra
+        run: npx cdk deploy DocOpsProcessing --require-approval never --outputs-file cdk-outputs-processing.json
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          DOCLING_SERVICE_URL: ${{ secrets.DOCLING_SERVICE_URL }}
+
+      - name: Deploy API Stack
+        working-directory: infra
+        run: npx cdk deploy DocOpsApi --require-approval never --outputs-file cdk-outputs-api.json
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          DOCLING_SERVICE_URL: ${{ secrets.DOCLING_SERVICE_URL }}
+
+      - name: Extract production API URL
+        id: api-url-prod
+        run: |
+          API_URL=$(cat infra/cdk-outputs-api.json | python3 -c \
+            "import sys, json; data=json.load(sys.stdin); \
+             url=next((v.get('ApiEndpointUrl','') for v in data.values() if 'ApiEndpointUrl' in v), ''); \
+             print(url)")
+          echo "api_url=${API_URL:-${{ vars.PRODUCTION_API_URL }}}" >> $GITHUB_OUTPUT
+
+      - name: Wait for production to stabilize
+        run: sleep 30
+
+      - name: Production readiness smoke test
+        id: prod-readiness
+        run: |
+          API="${{ steps.api-url-prod.outputs.api_url }}"
+          echo "Running smoke test against $API"
+
+          # Liveness
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${API}v1/health")
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ Liveness FAILED: HTTP $STATUS"
+            exit 1
+          fi
+          echo "✅ Liveness: HTTP $STATUS"
+
+          # Readiness (G6-19: readiness probe)
+          RESPONSE=$(curl -s "${API}v1/health/ready")
+          READY_STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "unknown")
+          echo "ready_status=$READY_STATUS" >> $GITHUB_OUTPUT
+          if [ "$READY_STATUS" != "ready" ] && [ "$READY_STATUS" != "degraded" ]; then
+            echo "❌ Readiness FAILED: $READY_STATUS"
+            exit 1
+          fi
+          echo "✅ Readiness: $READY_STATUS"
+
+      - name: Upload production outputs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-outputs-${{ github.sha }}
+          path: infra/cdk-outputs-*.json
+          retention-days: 30
+
+      - name: Notify Slack — production deploy result
+        if: always()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && ':tada:' || ':fire:' }} *Production Deploy ${{ job.status == 'success' && 'COMPLETE' || 'FAILED' }}*",
+              "attachments": [{
+                "color": "${{ job.status == 'success' && 'good' || 'danger' }}",
+                "fields": [
+                  { "title": "Status", "value": "${{ job.status }}", "short": true },
+                  { "title": "Readiness", "value": "${{ steps.prod-readiness.outputs.ready_status || 'unknown' }}", "short": true },
+                  { "title": "Commit", "value": "<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>", "short": true },
+                  { "title": "Deployed by", "value": "${{ github.actor }}", "short": true }
+                ]
+              }]
+            }
+
+  # ── Auto-Rollback on Production Failure (G6-19) ───────────────────────────
+  rollback-production:
+    name: Auto-Rollback Production
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: failure() && needs.deploy-production.result == 'failure'
+    environment:
+      name: production
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.before }}  # roll back to the commit before this push
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: npm ci
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Notify Slack — rollback initiating
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": ":rewind: *AUTO-ROLLBACK INITIATED* — production deploy failed",
+              "attachments": [{
+                "color": "danger",
+                "fields": [
+                  { "title": "Rolling back to", "value": "${{ github.event.before }}", "short": true },
+                  { "title": "Failed commit", "value": "${{ github.sha }}", "short": true }
+                ]
+              }]
+            }
+
+      - name: CDK rollback to previous commit
+        working-directory: infra
+        run: |
+          npx cdk deploy DocOpsApi DocOpsProcessing \
+            --require-approval never
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          DOCLING_SERVICE_URL: ${{ secrets.DOCLING_SERVICE_URL }}
+
+      - name: Notify Slack — rollback result
+        if: always()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && ':white_check_mark: Rollback succeeded' || ':sos: ROLLBACK FAILED — MANUAL INTERVENTION REQUIRED' }}",
+              "attachments": [{
+                "color": "${{ job.status == 'success' && 'good' || 'danger' }}"
+              }]
+            }

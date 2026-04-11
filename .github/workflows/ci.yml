@@ -1,0 +1,231 @@
+name: CI
+
+# G6-07, G6-08: Enhanced CI pipeline with coverage thresholds and security scanning.
+# T4-08: Runs on every PR and push to main/develop.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ── TypeScript API ─────────────────────────────────────────────────────────
+  api:
+    name: API (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint src --ext .ts --max-warnings 0
+
+      # G6-07: Coverage threshold enforced — CI fails if line coverage < 80%
+      - name: Run tests with coverage
+        run: npm test -- --coverage --coverageThreshold='{"global":{"lines":80,"functions":80,"branches":70,"statements":80}}'
+        env:
+          AWS_REGION: us-east-1
+          TENANTS_TABLE: docops-tenants-test
+          WORKSPACES_TABLE: docops-workspaces-test
+          TRACES_TABLE: docops-traces-test
+          SESSIONS_TABLE: docops-sessions-test
+          HITL_REVIEWS_TABLE: docops-hitl-reviews-test
+          USAGE_TABLE: docops-usage-test
+          USAGE_EVENTS_TABLE: docops-usage-events-test
+          BEDROCK_MODEL_ID: anthropic.claude-3-haiku-20240307-v1:0
+          SESSION_MEMORY_TABLE: docops-session-memory-test
+          WEBHOOKS_TABLE: docops-webhooks-test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-coverage-${{ github.sha }}
+          path: api/coverage/
+          retention-days: 14
+
+      # G6-08: Dependency vulnerability scan — fail on high/critical CVEs
+      - name: Security audit (npm)
+        run: npm audit --audit-level=high
+
+      - name: Build
+        run: npm run build
+
+  # ── Next.js UI ─────────────────────────────────────────────────────────────
+  ui:
+    name: UI (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx next lint
+
+      # G6-07: UI tests with coverage threshold
+      - name: Run tests with coverage
+        run: npm test -- --coverage --coverageThreshold='{"global":{"lines":70,"functions":70}}'
+
+      # G6-08: UI dependency security audit
+      - name: Security audit (npm)
+        run: npm audit --audit-level=high
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.docops.dataopslabs.com
+
+  # ── Python Processor ────────────────────────────────────────────────────────
+  processor:
+    name: Processor (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/processor
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pydantic httpx boto3 tenacity pytest pytest-cov
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check . --select E,F,W --ignore E501
+
+      # G6-07: Python coverage threshold — fail if below 80%
+      - name: Run tests with coverage
+        run: pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=80 -q --ignore=tests/integration
+        env:
+          TRACES_TABLE: docops-traces-test
+          WORKSPACES_TABLE: docops-workspaces-test
+          DOCUMENTS_BUCKET: docops-documents-test
+          DOCLING_SERVICE_URL: http://localhost:5001
+          BEDROCK_MODEL_ID: anthropic.claude-3-haiku-20240307-v1:0
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: processor-coverage-${{ github.sha }}
+          path: services/processor/coverage.xml
+          retention-days: 14
+
+      # G6-08: Python dependency security scan
+      - name: Security audit (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit --vulnerability-service pypi || true
+
+  # ── CDK Infrastructure ─────────────────────────────────────────────────────
+  infra:
+    name: Infrastructure (CDK)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: CDK synth (dry-run, no AWS credentials needed)
+        run: npx cdk synth --all --quiet
+        env:
+          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_REGION: us-east-1
+          DOCLING_SERVICE_URL: http://localhost:5001
+
+      # G6-08: Infrastructure dependency security audit
+      - name: Security audit (npm)
+        run: npm audit --audit-level=high
+
+  # ── Container Security Scan ────────────────────────────────────────────────
+  # G6-08: Scan files for known CVEs using Trivy — only on merges to main
+  container-scan:
+    name: Container Security (Trivy)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner (filesystem mode)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'

@@ -20,7 +20,7 @@ const doclingServiceUrl =
 
 const dbStack = new DatabaseStack(app, 'DocOpsDatabase', {
   env,
-  description: 'DocOps — DynamoDB tables',
+  description: 'DocOps — DynamoDB tables + KMS encryption',
 });
 
 const authStack = new AuthStack(app, 'DocOpsAuth', {
@@ -34,6 +34,10 @@ const processingStack = new ProcessingStack(app, 'DocOpsProcessing', {
   tracesTable: dbStack.tracesTable,
   workspacesTable: dbStack.workspacesTable,
   doclingServiceUrl,
+  // G5-09: Share KMS key from DatabaseStack for S3 encryption (unified key management)
+  tableEncryptionKey: dbStack.tableEncryptionKey,
+  // G5-12: Pass webhooks table so dispatcher Lambda can query registrations
+  webhooksTable: dbStack.webhooksTable,
 });
 
 new ApiStack(app, 'DocOpsApi', {
@@ -44,10 +48,20 @@ new ApiStack(app, 'DocOpsApi', {
   tracesTable: dbStack.tracesTable,
   sessionsTable: dbStack.sessionsTable,
   hitlReviewsTable: dbStack.hitlReviewsTable,
+  usageTable: dbStack.usageTable,
+  usageEventsTable: dbStack.usageEventsTable,
+  // G5-23: Pass audit log table so API Lambda can write compliance events
+  auditLogTable: dbStack.auditLogTable,
+  // G5-12: Pass webhooks table so API Lambda can manage registrations
+  webhooksTable: dbStack.webhooksTable,
+  // G6-18: Pass session memory table for per-turn message storage
+  sessionMemoryTable: dbStack.sessionMemoryTable,
   userPool: authStack.userPool,
   documentsBucket: processingStack.documentsBucket,
   processorFunctionArn: processingStack.processorFunction.functionArn,
   doclingServiceUrl,
+  // T4-05: Share SNS alert topic from ProcessingStack so all alarms route to one topic
+  alertTopic: processingStack.alertTopic,
 });
 
 app.synth();
