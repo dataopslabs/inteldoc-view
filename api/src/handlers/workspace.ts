@@ -52,7 +52,7 @@ function validateWorkspaceFields(
 export async function handleCreateWorkspace(req: ApiRequest): Promise<ApiResponse> {
   const tenant = req.context.tenant!;
 
-  const body = req.body as { name?: string; description?: string; hitl_threshold?: number; agents?: unknown[] };
+  const body = req.body as { name?: string; description?: string; hitl_threshold?: number; agents?: unknown[]; schema?: Record<string, unknown> };
   if (!body?.name) {
     return { statusCode: 400, body: { error: 'name is required' } };
   }
@@ -78,6 +78,7 @@ export async function handleCreateWorkspace(req: ApiRequest): Promise<ApiRespons
     prompt_version: '1.0.0',
     agents: [],
     hitl_threshold: body.hitl_threshold ?? 0.8,
+    ...(body.schema ? { schema: body.schema } : {}),
     created_at: now,
     updated_at: now,
   };
