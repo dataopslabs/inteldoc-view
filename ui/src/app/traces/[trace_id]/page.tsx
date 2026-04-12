@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { api, Trace, FieldResult, ValidationError } from '@/lib/api';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -81,6 +82,7 @@ function FieldRow({ field }: { field: FieldResult }) {
 
 export default function TraceDetailPage() {
   const { trace_id } = useParams<{ trace_id: string }>();
+  const router = useRouter();
   const [trace, setTrace] = useState<Trace | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +127,7 @@ export default function TraceDetailPage() {
     <div className="flex flex-col min-h-screen" style={{ backgroundColor: '#08090a' }}>
       <Header title={`Trace · ${trace.trace_id.slice(0, 8)}`} />
       <div className="flex-1 p-6 max-w-5xl mx-auto w-full">
+        <ErrorBoundary section="Trace Detail">
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
@@ -287,18 +290,28 @@ export default function TraceDetailPage() {
         {/* HITL banner */}
         {trace.status === 'hitl_required' && (
           <div
-            className="mt-6 px-4 py-4 rounded-lg"
+            className="mt-6 px-4 py-4 rounded-lg flex items-center justify-between gap-4"
             style={{ backgroundColor: 'rgba(113,112,255,0.08)', border: '1px solid rgba(113,112,255,0.2)' }}
           >
-            <div className="text-sm font-medium mb-1" style={{ color: '#7170ff' }}>
-              Human review required
+            <div>
+              <div className="text-sm font-medium mb-1" style={{ color: '#7170ff' }}>
+                Human review required
+              </div>
+              <div className="text-xs" style={{ color: '#8a8f98' }}>
+                Confidence is below the workspace threshold. Open the review queue to assign and correct this trace.
+              </div>
             </div>
-            <div className="text-xs" style={{ color: '#8a8f98' }}>
-              Confidence is below the workspace threshold. HITL review panel will be available in Phase 4.
-            </div>
+            <button
+              onClick={() => router.push(`/hitl/${trace_id}`)}
+              className="shrink-0 text-xs font-medium px-3 py-1.5 rounded"
+              style={{ backgroundColor: '#7170ff', color: '#fff', border: 'none', cursor: 'pointer' }}
+            >
+              Open review →
+            </button>
           </div>
         )}
 
+        </ErrorBoundary>
       </div>
     </div>
   );

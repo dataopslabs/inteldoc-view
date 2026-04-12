@@ -1,5 +1,6 @@
 import { ApiRequest, ApiResponse } from '../models/types';
-import { getItem, queryIndex, TABLE_NAMES } from '../lib/dynamo';
+// T1-03: Use top-level imports only — removed dynamic import anti-pattern
+import { getItem, queryIndexPaginated, TABLE_NAMES } from '../lib/dynamo';
 
 interface Trace {
   trace_id: string;
@@ -37,9 +38,8 @@ export async function handleListTraces(req: ApiRequest): Promise<ApiResponse> {
   const { id: workspaceId } = req.pathParams;
   const tenant = req.context.tenant!;
 
-  // Verify workspace ownership
-  const { getItem: gi } = await import('../lib/dynamo');
-  const workspace = await gi<{ tenant_id: string }>(TABLE_NAMES.workspaces, { workspace_id: workspaceId });
+  // T1-03: Use top-level imported getItem — no dynamic import needed
+  const workspace = await getItem<{ tenant_id: string }>(TABLE_NAMES.workspaces, { workspace_id: workspaceId });
   if (!workspace) {
     return { statusCode: 404, body: { error: 'Workspace not found' } };
   }
@@ -47,14 +47,28 @@ export async function handleListTraces(req: ApiRequest): Promise<ApiResponse> {
     return { statusCode: 403, body: { error: 'Forbidden' } };
   }
 
-  const traces = await queryIndex<Trace>(
+  // T1-02: Paginated query — accept limit and next_token query params
+  const limit = Math.min(parseInt(req.queryParams?.limit ?? '50', 10) || 50, 100);
+  const nextToken = req.queryParams?.next_token;
+
+  const result = await queryIndexPaginated<Trace>(
     TABLE_NAMES.traces,
     'workspace-index',
     'workspace_id',
-    workspaceId
+    workspaceId,
+    limit,
+    nextToken
   );
 
-  // Sort newest first
-  traces.sort((a, b) => b.created_at.localeCompare(a.created_at));
-  return { statusCode: 200, body: { traces, count: traces.length } };
+  // T2-08: Sort newest first within the current page
+  const sorted = [...result.items].sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  return {
+    statusCode: 200,
+    body: {
+      traces: sorted,
+      count: sorted.length,
+      ...(result.nextToken ? { next_token: result.nextToken } : {}),
+    },
+  };
 }

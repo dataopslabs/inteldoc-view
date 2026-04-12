@@ -1,0 +1,4 @@
+# file: /Users/jayyanar/Documents/GitHub/inteldoc-view/services/workflow/models.py
+# hypothesis_version: 6.150.2
+
+[0.0, '1.0.0', 'agent_steps', 'confidence', 'fields', 'latency_ms', 'none', 'status', 'success', 'tokens', 'trace_id', 'validation_errors', 'workflow_state', 'workspace_id']

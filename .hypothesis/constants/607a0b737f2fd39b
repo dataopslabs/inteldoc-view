@@ -1,0 +1,4 @@
+# file: /Users/jayyanar/Documents/GitHub/inteldoc-view/services/llm_reasoning.py
+# hypothesis_version: 6.150.2
+
+['LLMReasoningService', '__init__.py', '_llm_reasoning_impl', 'llm-reasoning']

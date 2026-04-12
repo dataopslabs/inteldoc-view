@@ -1,4 +1,4 @@
-import { fetchAuthSession } from 'aws-amplify/auth';
+import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
@@ -11,16 +11,77 @@ async function getToken(): Promise<string | null> {
   }
 }
 
+async function getUserEmail(): Promise<string | null> {
+  try {
+    const attrs = await fetchUserAttributes();
+    return attrs.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function redirectToLogin(): void {
+  if (typeof window !== 'undefined') {
+    window.location.href = '/auth/login';
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = await getToken();
+  const [token, email] = await Promise.all([getToken(), getUserEmail()]);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (email) headers['X-User-Email'] = email;
 
   const res = await fetch(`${API_URL}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  if (res.status === 401) {
+    // Attempt to refresh the Amplify session and retry once
+    try {
+      const [refreshedSession, refreshedEmail] = await Promise.all([
+        fetchAuthSession({ forceRefresh: true }),
+        getUserEmail(),
+      ]);
+      const newToken = refreshedSession.tokens?.idToken?.toString() ?? null;
+      if (!newToken) {
+        redirectToLogin();
+        throw new Error('Session expired');
+      }
+
+      const retryHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${newToken}`,
+      };
+      if (refreshedEmail) retryHeaders['X-User-Email'] = refreshedEmail;
+
+      const retryRes = await fetch(`${API_URL}${path}`, {
+        method,
+        headers: retryHeaders,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      if (retryRes.status === 401) {
+        redirectToLogin();
+        throw new Error('Session expired');
+      }
+
+      if (!retryRes.ok) {
+        const err = await retryRes.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(err.error ?? `HTTP ${retryRes.status}`);
+      }
+
+      return retryRes.json() as Promise<T>;
+    } catch (refreshError) {
+      if (refreshError instanceof Error && refreshError.message === 'Session expired') {
+        throw refreshError;
+      }
+      redirectToLogin();
+      throw new Error('Session expired');
+    }
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Request failed' }));
@@ -74,8 +135,223 @@ export interface Trace {
   error?: string;
 }
 
+export interface HitlReview {
+  trace_id: string;
+  workspace_id: string;
+  status: 'pending' | 'in_review' | 'resolved';
+  reviewer?: string;
+  corrections: Correction[];
+  assigned_at?: string;
+  resolved_at?: string;
+  review_duration_ms?: number;
+  correction_count?: number;
+  created_at: string;
+}
+
+export interface Correction {
+  field_name: string;
+  original_value: unknown;
+  corrected_value: unknown;
+}
+
+export interface Session {
+  session_id: string;
+  workspace_id: string;
+  tenant_id: string;
+  title: string;
+  memory: MemoryEntry[];
+  created_at: string;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  workspace_id: string;
+  title: string;
+  message_count: number;
+  created_at: string;
+}
+
+export interface MemoryEntry {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+export interface ChatResponse {
+  response: string;
+  message_count: number;
+  tokens: { input: number; output: number };
+}
+
+export interface DashboardResponse {
+  dashboard: DashboardMetrics;
+  hitl: HitlMetrics;
+  error_analysis: ErrorGroup[];
+  time_range: TimeRange;
+  workspaces?: WorkspaceMetricsGroup[];
+  time_series?: TimeSeriesBucket[];
+}
+
+export interface DashboardMetrics {
+  total_traces: number;
+  success_count: number;
+  failure_count: number;
+  hitl_required_count: number;
+  success_rate: number;
+  failure_rate: number;
+  average_confidence: number;
+  average_latency_ms: number;
+  total_tokens: number;
+}
+
+export interface HitlMetrics {
+  total_reviews: number;
+  pending_count: number;
+  in_review_count: number;
+  resolved_count: number;
+  average_review_duration_ms: number;
+  average_correction_count: number;
+}
+
+export interface AgentMetric {
+  agent_name: string;
+  total_executions: number;
+  success_count: number;
+  error_count: number;
+  average_latency_ms: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  models: { model_id: string; execution_count: number; average_latency_ms: number }[];
+}
+
+export interface AgentMetricsResponse {
+  agents: AgentMetric[];
+  total_traces: number;
+  time_range: TimeRange;
+}
+
+export interface ErrorGroup {
+  error_message: string;
+  count: number;
+}
+
+export interface TimeRange {
+  start: string;
+  end: string;
+}
+
+export interface TimeSeriesBucket {
+  bucket_start: string;
+  metrics: DashboardMetrics;
+}
+
+export interface WorkspaceMetricsGroup {
+  workspace_id: string;
+  workspace_name: string;
+  metrics: DashboardMetrics;
+}
+
+export interface UsageResponse {
+  usage: {
+    total_documents_processed: number;
+    total_tokens_consumed: number;
+    workspace_count: number;
+    active_sessions_count: number;
+    plan: string;
+    plan_limits: { docs_per_month: number; workspaces: number; tokens_per_month?: number };
+  };
+  time_range: TimeRange;
+}
+
+// ── G6-10: New types for billing, webhooks, GDPR, batch ─────────────────────
+
+export interface BillingPlan {
+  plan: string;
+  billing_period: string;
+  limits: {
+    workspaces: number;
+    docs_per_month: number;
+    tokens_per_month: number;
+    chats_per_month: number;
+  };
+  usage: {
+    documents: number;
+    tokens: number;
+    chats: number;
+    workspaces: number;
+  };
+  has_admin_override: boolean;
+  grace_period?: {
+    previous_plan: string;
+    downgrade_at: string;
+    expires_at: string;
+  } | null;
+}
+
+export interface PlanChangeResponse {
+  plan: string;
+  previous_plan: string | null;
+  downgrade_at: string | null;
+  upgrade: boolean;
+}
+
+export type WebhookEvent = 'trace.completed' | 'trace.failed' | 'trace.hitl_required' | '*';
+
+export interface WebhookRegistration {
+  webhook_id: string;
+  tenant_id?: string;
+  url: string;
+  events: WebhookEvent[];
+  description?: string;
+  active: boolean;
+  signing_secret?: string; // Shown ONCE on creation — never returned again
+  secret_arn?: string;
+  created_at: string;
+}
+
+export interface GdprExportData {
+  export_timestamp: string;
+  tenant: Record<string, unknown>;
+  data: {
+    workspaces: Workspace[];
+    traces: Trace[];
+    sessions: Session[];
+    hitl_reviews: HitlReview[];
+    webhooks?: WebhookRegistration[];
+    usage_events?: unknown[];
+    counts: Record<string, number>;
+  };
+}
+
+export interface BatchUploadItem {
+  filename: string;
+  content_base64: string;
+}
+
+export interface BatchProcessResponse {
+  submitted: number;
+  traces: Array<{ trace_id: string; status: string; filename: string }>;
+  errors?: Array<{ filename: string; error: string }>;
+}
+
+export interface ReadinessResponse {
+  status: 'ready' | 'degraded';
+  checks: { dynamodb: boolean; s3: boolean; bedrock: boolean };
+  timestamp: string;
+}
+
+function buildQuery(params?: Record<string, string | undefined>): string {
+  if (!params) return '';
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) return '';
+  return '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join('&');
+}
+
 export const api = {
   health: () => request<{ status: string }>('GET', '/v1/health'),
+  /** G6-10: Readiness probe — checks DynamoDB + S3 + Bedrock connectivity */
+  healthReady: () => request<ReadinessResponse>('GET', '/v1/health/ready'),
+
   workspaces: {
     list: () => request<{ workspaces: Workspace[]; count: number }>('GET', '/v1/workspaces'),
     get: (id: string) => request<Workspace>('GET', `/v1/workspaces/${id}`),
@@ -92,16 +368,108 @@ export const api = {
         agents?: string[];
       }
     ) => request<Workspace>('PUT', `/v1/workspaces/${id}`, data),
+    delete: (id: string) => request<null>('DELETE', `/v1/workspaces/${id}`),
   },
+
   traces: {
-    list: (workspaceId: string) =>
-      request<{ traces: Trace[]; count: number }>('GET', `/v1/workspaces/${workspaceId}/traces`),
+    list: (workspaceId: string, params?: { status?: string; next_token?: string }) =>
+      request<{ traces: Trace[]; count: number; next_token?: string }>(
+        'GET',
+        `/v1/workspaces/${workspaceId}/traces${buildQuery(params)}`
+      ),
     get: (traceId: string) => request<Trace>('GET', `/v1/traces/${traceId}`),
   },
+
   process: (workspaceId: string, data: { filename: string; content_base64: string }) =>
     request<{ trace_id: string; status: string; message: string }>(
       'POST',
       `/v1/workspaces/${workspaceId}/process`,
       data
     ),
+
+  /** G6-10: Batch document upload */
+  batch: (workspaceId: string, documents: BatchUploadItem[]) =>
+    request<BatchProcessResponse>(
+      'POST',
+      `/v1/workspaces/${workspaceId}/process/batch`,
+      { documents }
+    ),
+
+  /** G6-10: Reprocess an existing trace */
+  reprocess: (traceId: string) =>
+    request<{ trace_id: string; status: string; message: string }>(
+      'POST',
+      `/v1/traces/${traceId}/reprocess`
+    ),
+
+  /** G6-22: Get presigned S3 upload URL for large files */
+  uploadUrl: (workspaceId: string, filename: string) =>
+    request<{ upload_url: string; s3_key: string; expires_in: number; workspace_id: string }>(
+      'POST',
+      `/v1/workspaces/${workspaceId}/upload-url`,
+      { filename }
+    ),
+
+  hitl: {
+    list: (params?: { workspace_id?: string; status?: string; next_token?: string }) =>
+      request<{ reviews: HitlReview[]; count: number; next_token?: string }>('GET', `/v1/hitl${buildQuery(params)}`),
+    get: (traceId: string) =>
+      request<{ review: HitlReview; trace: Trace }>('GET', `/v1/hitl/${traceId}`),
+    assign: (traceId: string, reviewer: string) =>
+      request<HitlReview>('POST', `/v1/hitl/${traceId}/assign`, { reviewer }),
+    submitCorrections: (traceId: string, corrections: Correction[]) =>
+      request<HitlReview>('POST', `/v1/hitl/${traceId}/corrections`, { corrections }),
+    resolve: (traceId: string) =>
+      request<{ review: HitlReview }>('POST', `/v1/hitl/${traceId}/resolve`),
+  },
+
+  sessions: {
+    create: (workspaceId: string, title?: string) =>
+      request<Session>('POST', `/v1/workspaces/${workspaceId}/sessions`, { title }),
+    list: (workspaceId: string) =>
+      request<{ sessions: SessionSummary[]; count: number }>('GET', `/v1/workspaces/${workspaceId}/sessions`),
+    get: (sessionId: string) =>
+      request<Session>('GET', `/v1/sessions/${sessionId}`),
+    delete: (sessionId: string) =>
+      request<{ message: string }>('DELETE', `/v1/sessions/${sessionId}`),
+    chat: (sessionId: string, message: string) =>
+      request<ChatResponse>('POST', `/v1/sessions/${sessionId}/chat`, { message }),
+  },
+
+  observability: {
+    dashboard: (params?: { workspace_id?: string; range?: string; start?: string; end?: string; group_by?: string; granularity?: string }) =>
+      request<DashboardResponse>('GET', `/v1/observability${buildQuery(params)}`),
+    traces: (params?: { workspace_id?: string; status?: string; range?: string; start?: string; end?: string; next_token?: string }) =>
+      request<{ traces: Trace[]; count: number; time_range: TimeRange; next_token?: string }>('GET', `/v1/observability/traces${buildQuery(params)}`),
+    agents: (params?: { workspace_id?: string; range?: string; start?: string; end?: string }) =>
+      request<AgentMetricsResponse>('GET', `/v1/observability/agents${buildQuery(params)}`),
+    usage: (params?: { range?: string; start?: string; end?: string }) =>
+      request<UsageResponse>('GET', `/v1/observability/usage${buildQuery(params)}`),
+  },
+
+  /** G6-10: Billing / Plan management */
+  billing: {
+    getPlan: () => request<BillingPlan>('GET', '/v1/tenant/plan'),
+    changePlan: (plan: string) => request<PlanChangeResponse>('POST', '/v1/tenant/plan', { plan }),
+    exportUsage: (billingPeriod: string) =>
+      request<{ billing_period: string; events: unknown[]; count: number }>(
+        'GET',
+        `/v1/tenant/usage/export?billing_period=${encodeURIComponent(billingPeriod)}`
+      ),
+  },
+
+  /** G6-10: Webhook management */
+  webhooks: {
+    list: () => request<{ webhooks: WebhookRegistration[]; count: number }>('GET', '/v1/tenant/webhooks'),
+    register: (data: { url: string; events?: WebhookEvent[]; description?: string }) =>
+      request<WebhookRegistration>('POST', '/v1/tenant/webhooks', data),
+    delete: (webhookId: string) => request<null>('DELETE', `/v1/tenant/webhooks/${webhookId}`),
+  },
+
+  /** G6-10: GDPR data management */
+  gdpr: {
+    exportData: () => request<GdprExportData>('GET', '/v1/tenant/export'),
+    deleteAccount: () =>
+      request<{ message: string; tenant_id: string; deleted_at: string }>('DELETE', '/v1/tenant'),
+  },
 };

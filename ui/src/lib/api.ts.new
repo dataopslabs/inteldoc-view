@@ -1,0 +1,287 @@
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('auth_token');
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? `HTTP ${res.status}`);
+  }
+
+  if (res.status === 204) return null as T;
+  return res.json() as Promise<T>;
+}
+
+function buildQuery(params: Record<string, string | number | boolean | undefined | null>): string {
+  const q = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&');
+  return q ? `?${q}` : '';
+}
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+export interface Workspace {
+  workspace_id: string;
+  tenant_id: string;
+  name: string;
+  description?: string;
+  config?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TraceStatus {
+  trace_id: string;
+  workspace_id: string;
+  status: string;
+  filename?: string;
+  s3_key?: string;
+  created_at: string;
+  updated_at: string;
+  error?: string;
+  result?: Record<string, unknown>;
+}
+
+export interface HitlTask {
+  task_id: string;
+  trace_id: string;
+  workspace_id: string;
+  type: string;
+  status: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatSession {
+  session_id: string;
+  workspace_id: string;
+  trace_id?: string;
+  messages: ChatMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ObservabilityMetrics {
+  period: string;
+  total_traces: number;
+  completed_traces: number;
+  failed_traces: number;
+  hitl_required: number;
+  avg_processing_time_ms?: number;
+  token_usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+}
+
+// ── G6-10: New types for billing, webhooks, GDPR, batch ────────────────────
+
+export interface BillingPlan {
+  plan: string;
+  billing_period: string;
+  limits: {
+    workspaces: number;
+    docs_per_month: number;
+    tokens_per_month: number;
+    chats_per_month: number;
+  };
+  usage: {
+    documents: number;
+    tokens: number;
+    chats: number;
+    workspaces: number;
+  };
+  has_admin_override: boolean;
+  grace_period?: {
+    previous_plan: string;
+    downgrade_at: string;
+    expires_at: string;
+  } | null;
+}
+
+export interface PlanChangeResponse {
+  plan: string;
+  previous_plan: string | null;
+  downgrade_at: string | null;
+  upgrade: boolean;
+}
+
+export type WebhookEvent = 'trace.completed' | 'trace.failed' | 'trace.hitl_required' | '*';
+
+export interface WebhookRegistration {
+  webhook_id: string;
+  tenant_id?: string;
+  url: string;
+  events: WebhookEvent[];
+  description?: string;
+  active: boolean;
+  signing_secret?: string;
+  created_at: string;
+}
+
+export interface GdprExportData {
+  export_timestamp: string;
+  tenant: Record<string, unknown>;
+  data: {
+    counts: Record<string, number>;
+  };
+}
+
+export interface BatchUploadItem {
+  filename: string;
+  content_base64: string;
+}
+
+export interface BatchProcessResponse {
+  submitted: number;
+  traces: Array<{ trace_id: string; status: string; filename: string }>;
+  errors?: Array<{ filename: string; error: string }>;
+}
+
+export interface ReadinessResponse {
+  status: 'ready' | 'degraded';
+  checks: { dynamodb: boolean; s3: boolean; bedrock: boolean };
+  timestamp: string;
+}
+
+export const api = {
+  health: () => request<{ status: string }>('GET', '/v1/health'),
+  healthReady: () => request<ReadinessResponse>('GET', '/v1/health/ready'),
+
+  workspaces: {
+    list: () => request<{ workspaces: Workspace[]; count: number }>('GET', '/v1/workspaces'),
+    get: (id: string) => request<Workspace>('GET', `/v1/workspaces/${id}`),
+    create: (data: { name: string; description?: string; config?: Record<string, unknown> }) =>
+      request<Workspace>('POST', '/v1/workspaces', data),
+    update: (id: string, data: { name?: string; description?: string; config?: Record<string, unknown> }) =>
+      request<Workspace>('PUT', `/v1/workspaces/${id}`, data),
+    delete: (id: string) => request<null>('DELETE', `/v1/workspaces/${id}`),
+  },
+
+  traces: {
+    list: (
+      workspaceId: string,
+      params?: { status?: string; limit?: number; offset?: number },
+    ) =>
+      request<{ traces: TraceStatus[]; count: number; limit: number; offset: number }>(
+        'GET',
+        `/v1/workspaces/${workspaceId}/traces${buildQuery(params ?? {})}`,
+      ),
+    get: (traceId: string) => request<TraceStatus>('GET', `/v1/traces/${traceId}`),
+    delete: (traceId: string) => request<null>('DELETE', `/v1/traces/${traceId}`),
+  },
+
+  process: (
+    workspaceId: string,
+    data: { filename: string; content_base64: string; metadata?: Record<string, unknown> },
+  ) =>
+    request<{ trace_id: string; status: string }>('POST', `/v1/workspaces/${workspaceId}/process`, data),
+
+  hitl: {
+    listPending: (workspaceId?: string) =>
+      request<{ tasks: HitlTask[]; count: number }>(
+        'GET',
+        `/v1/hitl/pending${buildQuery(workspaceId ? { workspace_id: workspaceId } : {})}`,
+      ),
+    getTask: (taskId: string) => request<HitlTask>('GET', `/v1/hitl/tasks/${taskId}`),
+    submitDecision: (taskId: string, data: { decision: string; notes?: string; metadata?: Record<string, unknown> }) =>
+      request<HitlTask>('POST', `/v1/hitl/tasks/${taskId}/decision`, data),
+  },
+
+  sessions: {
+    create: (workspaceId: string, traceId?: string) =>
+      request<ChatSession>('POST', `/v1/workspaces/${workspaceId}/sessions`, traceId ? { trace_id: traceId } : {}),
+    get: (sessionId: string) => request<ChatSession>('GET', `/v1/sessions/${sessionId}`),
+    list: (workspaceId: string) =>
+      request<{ sessions: ChatSession[]; count: number }>('GET', `/v1/workspaces/${workspaceId}/sessions`),
+    chat: (sessionId: string, message: string) =>
+      request<{ message: ChatMessage; session_id: string }>(
+        'POST',
+        `/v1/sessions/${sessionId}/chat`,
+        { message },
+      ),
+    delete: (sessionId: string) => request<null>('DELETE', `/v1/sessions/${sessionId}`),
+  },
+
+  observability: {
+    metrics: (workspaceId?: string, period?: string) =>
+      request<ObservabilityMetrics>(
+        'GET',
+        `/v1/observability/metrics${buildQuery({ workspace_id: workspaceId, period })}`,
+      ),
+    traces: (params?: {
+      workspace_id?: string;
+      status?: string;
+      limit?: number;
+      offset?: number;
+      start_time?: string;
+      end_time?: string;
+    }) =>
+      request<{ traces: TraceStatus[]; count: number }>(
+        'GET',
+        `/v1/observability/traces${buildQuery(params ?? {})}`,
+      ),
+  },
+
+  billing: {
+    getPlan: () => request<BillingPlan>('GET', '/v1/tenant/plan'),
+    changePlan: (plan: string) => request<PlanChangeResponse>('POST', '/v1/tenant/plan', { plan }),
+    exportUsage: (billingPeriod: string) =>
+      request<{ billing_period: string; events: unknown[]; count: number }>(
+        'GET', `/v1/tenant/usage/export?billing_period=${encodeURIComponent(billingPeriod)}`
+      ),
+  },
+
+  webhooks: {
+    list: () => request<{ webhooks: WebhookRegistration[]; count: number }>('GET', '/v1/tenant/webhooks'),
+    register: (data: { url: string; events?: WebhookEvent[]; description?: string }) =>
+      request<WebhookRegistration>('POST', '/v1/tenant/webhooks', data),
+    delete: (webhookId: string) => request<null>('DELETE', `/v1/tenant/webhooks/${webhookId}`),
+  },
+
+  gdpr: {
+    exportData: () => request<GdprExportData>('GET', '/v1/tenant/export'),
+    deleteAccount: () => request<{ message: string; tenant_id: string; deleted_at: string }>('DELETE', '/v1/tenant'),
+  },
+
+  batch: (workspaceId: string, documents: BatchUploadItem[]) =>
+    request<BatchProcessResponse>('POST', `/v1/workspaces/${workspaceId}/process/batch`, { documents }),
+
+  reprocess: (traceId: string) =>
+    request<{ trace_id: string; status: string; message: string }>('POST', `/v1/traces/${traceId}/reprocess`),
+
+  uploadUrl: (workspaceId: string, filename: string, contentType?: string) =>
+    request<{ upload_url: string; s3_key: string; expires_in: number }>(
+      'POST', `/v1/workspaces/${workspaceId}/upload-url`, { filename, content_type: contentType }
+    ),
+};

@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { useToast } from '@/components/ToastProvider';
 import { api, Workspace } from '@/lib/api';
 
 const SCHEMA_PLACEHOLDER = `{
@@ -26,10 +28,13 @@ const SCHEMA_HELP = [
 export default function WorkspaceSettingsPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { showToast } = useToast();
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -89,10 +94,29 @@ export default function WorkspaceSettingsPage() {
         prompt_version: promptVersion,
       });
       setSuccess('Workspace settings saved');
+      showToast('Settings saved successfully', 'success');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      const msg = err instanceof Error ? err.message : 'Save failed';
+      setError(msg);
+      showToast(msg, 'error');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (deleteConfirm !== workspace?.name) return;
+    setError(null);
+    setDeleting(true);
+    try {
+      await api.workspaces.delete(id);
+      showToast(`Workspace "${workspace?.name}" deleted`, 'success');
+      router.replace('/workspaces');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Delete failed';
+      setError(msg);
+      showToast(msg, 'error');
+      setDeleting(false);
     }
   }
 
@@ -109,6 +133,7 @@ export default function WorkspaceSettingsPage() {
     <div className="flex flex-col min-h-screen" style={{ backgroundColor: '#08090a' }}>
       <Header title={`${workspace?.name ?? 'Workspace'} · Settings`} />
       <div className="flex-1 p-6 max-w-3xl mx-auto w-full">
+        <ErrorBoundary section="Workspace Settings">
 
         {/* Back link */}
         <button
@@ -277,6 +302,43 @@ export default function WorkspaceSettingsPage() {
           </div>
 
         </form>
+
+        {/* Danger Zone */}
+        <section
+          className="rounded-lg p-5 mt-6"
+          style={{ backgroundColor: '#0f1011', border: '1px solid rgba(239,68,68,0.25)' }}
+        >
+          <h2 className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: '#ef4444' }}>
+            Danger zone
+          </h2>
+          <p className="text-xs mb-4" style={{ color: '#62666d' }}>
+            Permanently delete this workspace and all associated data. This action cannot be undone.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs mb-1.5" style={{ color: '#8a8f98' }}>
+                Type <span className="font-mono" style={{ color: '#f7f8f8' }}>{workspace?.name}</span> to confirm
+              </label>
+              <input
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder={workspace?.name}
+                className="w-full text-sm px-3 py-2 rounded outline-none"
+                style={{ backgroundColor: '#191a1b', border: '1px solid rgba(239,68,68,0.3)', color: '#f7f8f8' }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting || deleteConfirm !== workspace?.name}
+              className="text-sm px-4 py-2 rounded font-medium disabled:opacity-40"
+              style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}
+            >
+              {deleting ? 'Deleting…' : 'Delete workspace'}
+            </button>
+          </div>
+        </section>
+        </ErrorBoundary>
       </div>
     </div>
   );

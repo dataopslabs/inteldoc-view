@@ -2,18 +2,21 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useAuth } from './AuthProvider';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: '⬡' },
   { href: '/workspaces', label: 'Workspaces', icon: '⊞' },
   { href: '/traces', label: 'Traces', icon: '⋯' },
   { href: '/hitl', label: 'HITL Review', icon: '◎' },
+  { href: '/observability', label: 'Observability', icon: '◈' },
   { href: '/chat', label: 'Chat', icon: '◻' },
   { href: '/settings', label: 'Settings', icon: '⚙' },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
 
   return (
     <aside
@@ -62,7 +65,12 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t text-xs" style={{ borderColor: 'rgba(255,255,255,0.06)', color: '#62666d' }}>
-        Phase 1 · Foundation
+        {user?.email && (
+          <div className="truncate mb-1" style={{ color: '#8a8f98' }} title={user.email}>
+            {user.email}
+          </div>
+        )}
+        Phase 3 · Full UI
       </div>
     </aside>
   );

@@ -25,6 +25,11 @@ const config: Config = {
         accent: '#7170ff',
         'accent-bg': '#5e6ad2',
         'accent-hover': '#828fff',
+        // Sentry design tokens
+        'sentry-bg': '#1a1025',
+        'sentry-surface': '#2a1f3d',
+        'sentry-lime': '#c2ef4e',
+        'sentry-lime-bg': 'rgba(194,239,78,0.1)',
         // Semantic
         success: '#27a644',
         warning: '#f59e0b',

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from typing import Any
 
 from .state_machine import WorkflowState, WorkflowStateMachine
@@ -31,6 +32,27 @@ logger.setLevel(logging.INFO)
 
 DOCUMENTS_BUCKET = os.environ.get("DOCUMENTS_BUCKET", "")
 _s3 = boto3.client("s3")
+
+HITL_TABLE = os.environ.get("HITL_REVIEWS_TABLE", "docops-hitl-reviews")
+_dynamodb = boto3.resource("dynamodb")
+hitl_table = _dynamodb.Table(HITL_TABLE)
+
+
+def create_hitl_review(trace_id: str, workspace_id: str) -> None:
+    """Create a pending HITL review record for a trace flagged as hitl_required."""
+    try:
+        hitl_table.put_item(
+            Item={
+                "trace_id": trace_id,
+                "workspace_id": workspace_id,
+                "status": "pending",
+                "corrections": [],
+                "created_at": datetime.utcnow().isoformat(),
+            },
+            ConditionExpression="attribute_not_exists(trace_id)",
+        )
+    except _dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        logger.warning("HITL review already exists for trace %s", trace_id)
 
 
 def run_workflow(event: dict[str, Any]) -> dict[str, Any]:
@@ -138,6 +160,9 @@ def run_workflow(event: dict[str, Any]) -> dict[str, Any]:
             "validation_warnings": val_result.warnings,
         },
     )
+
+    if next_state == WorkflowState.hitl_pending:
+        create_hitl_review(trace_id, workspace_id)
 
     logger.info("[%s] Workflow complete — state=%s confidence=%.3f latency=%.0fms",
                 trace_id, next_state.value, recon.overall_confidence, latency_ms)

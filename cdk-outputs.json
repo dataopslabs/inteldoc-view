@@ -1,0 +1,26 @@
+{
+  "DocOpsDatabase": {
+    "ExportsOutputFnGetAttSessionsTable7C302024Arn24FF8012": "arn:aws:dynamodb:us-east-1:098493093308:table/docops-sessions",
+    "ExportsOutputRefSessionsTable7C3020246E1CCFDD": "docops-sessions",
+    "ExportsOutputFnGetAttTracesTable3BACD97FArn15AF018E": "arn:aws:dynamodb:us-east-1:098493093308:table/docops-traces",
+    "ExportsOutputRefTracesTable3BACD97F02051F2B": "docops-traces",
+    "ExportsOutputRefWorkspacesTable4AC3508647701744": "docops-workspaces",
+    "TenantsTableName": "docops-tenants",
+    "WorkspacesTableName": "docops-workspaces",
+    "HitlReviewsTableName": "docops-hitl-reviews",
+    "ExportsOutputRefTenantsTableB701DC57BE8E768B": "docops-tenants",
+    "ExportsOutputFnGetAttHitlReviewsTable73540339ArnEE5D4F2A": "arn:aws:dynamodb:us-east-1:098493093308:table/docops-hitl-reviews",
+    "TracesTableName": "docops-traces",
+    "ExportsOutputFnGetAttWorkspacesTable4AC35086ArnF4B03E3E": "arn:aws:dynamodb:us-east-1:098493093308:table/docops-workspaces",
+    "ExportsOutputRefHitlReviewsTable73540339ACFFDB25": "docops-hitl-reviews",
+    "ExportsOutputFnGetAttTenantsTableB701DC57ArnFFAEC087": "arn:aws:dynamodb:us-east-1:098493093308:table/docops-tenants",
+    "SessionsTableName": "docops-sessions"
+  },
+  "DocOpsProcessing": {
+    "ProcessorFunctionArn": "arn:aws:lambda:us-east-1:098493093308:function:docops-processor",
+    "DocumentsBucketName": "docops-documents-098493093308-us-east-1",
+    "ExportsOutputFnGetAttProcessorFunctionE1AA307DArn0DB819F0": "arn:aws:lambda:us-east-1:098493093308:function:docops-processor",
+    "ExportsOutputRefDocumentsBucket9EC9DEB9131399C0": "docops-documents-098493093308-us-east-1",
+    "ExportsOutputFnGetAttDocumentsBucket9EC9DEB9ArnEA5095A7": "arn:aws:s3:::docops-documents-098493093308-us-east-1"
+  }
+}

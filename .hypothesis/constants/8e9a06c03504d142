@@ -1,0 +1,4 @@
+# file: /Users/jayyanar/Documents/GitHub/inteldoc-view/services/processor/__init__.py
+# hypothesis_version: 6.150.2
+
+[1.0, 1000, '#c', '#e', '#f', '#l', '#pv', '#s', '#t', ':confidence', ':error', ':fields', ':latency', ':prompt_version', ':status', ':tokens', 'Body', 'DOCUMENTS_BUCKET', 'Original error: %s', 'SET #s = :status', 'TRACES_TABLE', 'completed', 'confidence', 'docops-traces', 'dynamodb', 'error', 'failed', 'fields', 'hitl_required', 'latency', 'processing', 'prompt_version', 's3', 'status', 'tokens', 'trace_id']

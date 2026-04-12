@@ -1,0 +1,1092 @@
+openapi: 3.1.0
+info:
+  title: DocOps Agenticore API
+  version: 1.0.0
+  description: |
+    DocOps — Agentic Document Intelligence Platform.
+    Processes documents with AI-powered extraction, HITL review, and compliance-ready audit logging.
+  contact:
+    name: DocOps Support
+    url: https://docops.dataopslabs.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.docops.dataopslabs.com/v1
+    description: Production
+  - url: http://localhost:3000/v1
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito JWT token from user pool authentication
+
+  schemas:
+    # ── Common ──────────────────────────────────────────────────────────────
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "Workspace not found"
+
+    PlanLimits:
+      type: object
+      properties:
+        workspaces:
+          type: integer
+        docs_per_month:
+          type: integer
+        tokens_per_month:
+          type: integer
+        chats_per_month:
+          type: integer
+
+    # ── Workspace ──────────────────────────────────────────────────────────
+    Workspace:
+      type: object
+      required: [workspace_id, tenant_id, name, prompt_version, hitl_threshold, created_at]
+      properties:
+        workspace_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        prompt_version:
+          type: string
+          example: "1.0.0"
+        schema:
+          type: object
+          additionalProperties:
+            type: string
+          description: Field extraction schema — keys are field names, values are type hints
+        hitl_threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.8
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Trace ──────────────────────────────────────────────────────────────
+    Trace:
+      type: object
+      required: [trace_id, workspace_id, tenant_id, status, prompt_version, created_at]
+      properties:
+        trace_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+        tenant_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, hitl_required]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        tokens:
+          type: integer
+        latency:
+          type: number
+          description: Processing latency in milliseconds
+        agent_steps:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+        error_code:
+          type: string
+          description: Structured error code for failed traces
+          enum: [S3_NOT_FOUND, S3_ACCESS_DENIED, S3_DOWNLOAD_FAILED, DOCLING_TIMEOUT, DOCLING_SERVICE_ERROR, DOCLING_CONVERSION_FAILED, BEDROCK_THROTTLE, BEDROCK_MODEL_ERROR, LLM_PARSE_FAILED, DYNAMODB_WRITE_FAILED, UNKNOWN_ERROR, STALE_TIMEOUT]
+        prompt_version:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ── HITL ───────────────────────────────────────────────────────────────
+    HitlReview:
+      type: object
+      required: [trace_id, workspace_id, status, corrections, created_at]
+      properties:
+        trace_id:
+          type: string
+        workspace_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_review, resolved]
+        reviewer:
+          type: string
+        corrections:
+          type: array
+          items:
+            $ref: '#/components/schemas/Correction'
+        assigned_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+        review_duration_ms:
+          type: integer
+        correction_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    Correction:
+      type: object
+      required: [field_name, original_value, corrected_value]
+      properties:
+        field_name:
+          type: string
+        original_value: {}
+        corrected_value: {}
+
+    # ── Session + Chat ─────────────────────────────────────────────────────
+    Session:
+      type: object
+      required: [session_id, workspace_id, tenant_id, title, memory, created_at]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+        tenant_id:
+          type: string
+        title:
+          type: string
+        memory:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Health ─────────────────────────────────────────────────────────────
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ReadinessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        service:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              healthy:
+                type: boolean
+              latency_ms:
+                type: integer
+              error:
+                type: string
+
+paths:
+  # ── Health ────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      security: []
+      tags: [Health]
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /health/ready:
+    get:
+      operationId: getHealthReady
+      summary: Readiness check — verifies all dependencies
+      security: []
+      tags: [Health]
+      responses:
+        '200':
+          description: All dependencies healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: One or more dependencies degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+
+  # ── Workspaces ────────────────────────────────────────────────────────────
+  /workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: List workspaces for the authenticated tenant
+      tags: [Workspaces]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: next_token
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspaces:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workspace'
+                  next_token:
+                    type: string
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      operationId: createWorkspace
+      summary: Create a new workspace
+      tags: [Workspaces]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                schema:
+                  type: object
+                  additionalProperties:
+                    type: string
+                hitl_threshold:
+                  type: number
+                  default: 0.8
+      responses:
+        '201':
+          description: Workspace created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '429':
+          description: Workspace plan limit reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getWorkspace
+      summary: Get a workspace by ID
+      tags: [Workspaces]
+      responses:
+        '200':
+          description: Workspace details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      operationId: updateWorkspace
+      summary: Update a workspace
+      tags: [Workspaces]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                schema:
+                  type: object
+                hitl_threshold:
+                  type: number
+      responses:
+        '200':
+          description: Updated workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+    delete:
+      operationId: deleteWorkspace
+      summary: Delete a workspace (cascading soft-delete)
+      tags: [Workspaces]
+      responses:
+        '200':
+          description: Workspace deleted
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Document Processing ────────────────────────────────────────────────────
+  /workspaces/{id}/process:
+    post:
+      operationId: processDocument
+      summary: Submit a document for processing
+      tags: [Documents]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, content_base64]
+              properties:
+                filename:
+                  type: string
+                  example: invoice.pdf
+                content_base64:
+                  type: string
+                  format: byte
+                  description: Base64-encoded file content (max 10MB)
+                idempotency_key:
+                  type: string
+                  description: Client-supplied key for deduplication
+      responses:
+        '202':
+          description: Document accepted for processing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trace_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending]
+                  message:
+                    type: string
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Document plan limit reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{id}/process/batch:
+    post:
+      operationId: processDocumentBatch
+      summary: Submit up to 20 documents for bulk processing
+      tags: [Documents]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documents]
+              properties:
+                documents:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [filename, content_base64]
+                    properties:
+                      filename:
+                        type: string
+                      content_base64:
+                        type: string
+                        format: byte
+                      idempotency_key:
+                        type: string
+      responses:
+        '202':
+          description: Batch accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: integer
+                  total:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        filename:
+                          type: string
+                        trace_id:
+                          type: string
+                        status:
+                          type: string
+                          enum: [pending, duplicate, error]
+                        error:
+                          type: string
+
+  /workspaces/{id}/traces:
+    get:
+      operationId: listTraces
+      summary: List traces for a workspace
+      tags: [Traces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: next_token
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed, hitl_required]
+      responses:
+        '200':
+          description: List of traces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  traces:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Trace'
+                  next_token:
+                    type: string
+                  count:
+                    type: integer
+
+  /traces/{trace_id}:
+    get:
+      operationId: getTrace
+      summary: Get a trace by ID
+      tags: [Traces]
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trace details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trace'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /traces/{trace_id}/reprocess:
+    post:
+      operationId: reprocessTrace
+      summary: Re-queue a failed or completed trace for reprocessing
+      tags: [Traces]
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Trace re-queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trace_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [pending]
+                  message:
+                    type: string
+                  reprocessed_at:
+                    type: string
+                    format: date-time
+        '409':
+          description: Trace cannot be reprocessed in current status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── HITL ──────────────────────────────────────────────────────────────────
+  /hitl:
+    get:
+      operationId: listHitlReviews
+      summary: List HITL reviews for the tenant
+      tags: [HITL]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_review, resolved]
+      responses:
+        '200':
+          description: List of HITL reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviews:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HitlReview'
+
+  /hitl/{trace_id}:
+    get:
+      operationId: getHitlReview
+      summary: Get HITL review for a trace
+      tags: [HITL]
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: HITL review details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HitlReview'
+
+  /hitl/{trace_id}/assign:
+    post:
+      operationId: assignHitlReview
+      summary: Assign a HITL review to a reviewer
+      tags: [HITL]
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reviewer:
+                  type: string
+      responses:
+        '200':
+          description: Review assigned
+
+  /hitl/{trace_id}/corrections:
+    post:
+      operationId: submitHitlCorrections
+      summary: Submit field corrections for a HITL review
+      tags: [HITL]
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [corrections]
+              properties:
+                corrections:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Correction'
+      responses:
+        '200':
+          description: Corrections submitted
+
+  /hitl/{trace_id}/resolve:
+    post:
+      operationId: resolveHitlReview
+      summary: Mark a HITL review as resolved
+      tags: [HITL]
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Review resolved
+
+  # ── Sessions ───────────────────────────────────────────────────────────────
+  /workspaces/{id}/sessions:
+    post:
+      operationId: createSession
+      summary: Create a chat session
+      tags: [Sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+    get:
+      operationId: listSessions
+      summary: List sessions for a workspace
+      tags: [Sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+
+  /sessions/{id}:
+    get:
+      operationId: getSession
+      summary: Get a session by ID
+      tags: [Sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+    delete:
+      operationId: deleteSession
+      summary: Delete a session
+      tags: [Sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session deleted
+
+  /sessions/{id}/chat:
+    post:
+      operationId: sendChatMessage
+      summary: Send a chat message in a session
+      tags: [Sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+      responses:
+        '200':
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  message_count:
+                    type: integer
+                  tokens:
+                    type: object
+                    properties:
+                      input:
+                        type: integer
+                      output:
+                        type: integer
+        '429':
+          description: Chat or token plan limit reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Observability ─────────────────────────────────────────────────────────
+  /observability:
+    get:
+      operationId: getObservabilityDashboard
+      summary: Get observability dashboard metrics
+      tags: [Observability]
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+            enum: [7d, 30d, 90d]
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: workspace_id
+          in: query
+          schema:
+            type: string
+        - name: group_by
+          in: query
+          schema:
+            type: string
+            enum: [workspace]
+        - name: granularity
+          in: query
+          schema:
+            type: string
+            enum: [daily, weekly]
+      responses:
+        '200':
+          description: Dashboard metrics
+
+  /observability/traces:
+    get:
+      operationId: getTraceMetrics
+      summary: Get trace list for observability (paginated)
+      tags: [Observability]
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: next_token
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trace metrics with pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  traces:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Trace'
+                  count:
+                    type: integer
+                  total:
+                    type: integer
+                  next_token:
+                    type: string
+
+  /observability/agents:
+    get:
+      operationId: getAgentMetrics
+      summary: Get agent performance metrics
+      tags: [Observability]
+      responses:
+        '200':
+          description: Agent metrics
+
+  /observability/usage:
+    get:
+      operationId: getObservabilityUsage
+      summary: Get usage summary for observability
+      tags: [Observability]
+      responses:
+        '200':
+          description: Usage summary
+
+  # ── Billing ────────────────────────────────────────────────────────────────
+  /tenant/plan:
+    get:
+      operationId: getTenantPlan
+      summary: Get current plan and usage
+      tags: [Billing]
+      responses:
+        '200':
+          description: Plan details
+    post:
+      operationId: changeTenantPlan
+      summary: Change plan (upgrade or downgrade)
+      tags: [Billing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan:
+                  type: string
+                  enum: [free, pro, enterprise]
+      responses:
+        '200':
+          description: Plan updated
+
+  /tenant/usage/export:
+    get:
+      operationId: exportBillingUsage
+      summary: Export billing usage events for a period
+      tags: [Billing]
+      parameters:
+        - name: billing_period
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+            example: "2024-01"
+      responses:
+        '200':
+          description: Usage events export
+
+  # ── GDPR ──────────────────────────────────────────────────────────────────
+  /tenant/export:
+    get:
+      operationId: exportTenantData
+      summary: GDPR data export (DSAR) — full data for the tenant
+      tags: [GDPR]
+      responses:
+        '200':
+          description: Full tenant data export
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_timestamp:
+                    type: string
+                    format: date-time
+                  tenant:
+                    type: object
+                  data:
+                    type: object
+                    properties:
+                      workspaces:
+                        type: array
+                      traces:
+                        type: array
+                      sessions:
+                        type: array
+                      hitl_reviews:
+                        type: array
+                      counts:
+                        type: object
+
+  /tenant:
+    delete:
+      operationId: deleteTenant
+      summary: GDPR account deletion — soft-delete tenant and schedule data purge
+      tags: [GDPR]
+      responses:
+        '200':
+          description: Account deletion scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  tenant_id:
+                    type: string
+                  deleted_at:
+                    type: string
+                    format: date-time
+                  note:
+                    type: string
+
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Workspaces
+    description: Workspace management
+  - name: Documents
+    description: Document upload and processing
+  - name: Traces
+    description: Processing trace management
+  - name: HITL
+    description: Human-in-the-loop review workflow
+  - name: Sessions
+    description: Chat session management
+  - name: Observability
+    description: Metrics and dashboard data
+  - name: Billing
+    description: Plan and usage management
+  - name: GDPR
+    description: Data privacy and compliance endpoints

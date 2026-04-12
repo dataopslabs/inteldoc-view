@@ -1,0 +1,4 @@
+# file: /Users/jayyanar/Documents/GitHub/inteldoc-view/services/workflow/handler.py
+# hypothesis_version: 6.150.2
+
+['Item', 'WORKSPACES_TABLE', 'docops-workspaces', 'dynamodb', 'filename', 'trace_id', 'workspace_id']
