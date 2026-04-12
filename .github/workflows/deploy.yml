@@ -55,7 +55,7 @@ jobs:
           npm run build
 
       - name: Upload API dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: api-dist
           path: api/dist/
@@ -131,7 +131,7 @@ jobs:
           echo "api_url=${API_URL:-${{ vars.STAGING_API_URL }}}" >> $GITHUB_OUTPUT
 
       - name: Upload staging outputs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cdk-outputs-staging
           path: infra/cdk-outputs-staging.json
@@ -340,7 +340,7 @@ jobs:
 
       - name: Upload production outputs
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cdk-outputs-${{ github.sha }}
           path: infra/cdk-outputs-*.json
