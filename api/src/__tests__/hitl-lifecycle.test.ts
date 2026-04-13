@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBDocumentClient, GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, QueryCommand, UpdateCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import {
   handleListReviews,
   handleGetReview,
@@ -153,6 +153,19 @@ describe('HITL Review Lifecycle Integration', () => {
         if (current.trim()) assignments.push(current.trim());
 
         for (const assignment of assignments) {
+          // Handle list_append with optional if_not_exists wrapper:
+          // #x = list_append(if_not_exists(#x, :empty), :val)
+          // #x = list_append(#x, :val)
+          const listAppendIfNotExistsMatch = assignment.match(
+            /([#\w]+)\s*=\s*list_append\(\s*if_not_exists\(\s*[#\w]+\s*,\s*:\w+\s*\)\s*,\s*(:\w+)\s*\)/
+          );
+          if (listAppendIfNotExistsMatch) {
+            const targetField = resolve(listAppendIfNotExistsMatch[1]);
+            const appendValue = values[listAppendIfNotExistsMatch[2]] as unknown[];
+            const currentList = (existing[targetField] as unknown[]) ?? [];
+            existing[targetField] = [...currentList, ...appendValue];
+            continue;
+          }
           // Handle list_append: #x = list_append(#x, :val)
           const listAppendMatch = assignment.match(
             /([#\w]+)\s*=\s*list_append\(\s*([#\w]+)\s*,\s*(:\w+)\s*\)/
@@ -176,6 +189,33 @@ describe('HITL Review Lifecycle Integration', () => {
 
       tableStore.set(keyValue, existing);
       return { Attributes: JSON.parse(JSON.stringify(existing)) };
+    });
+
+    // --- Mock TransactWriteCommand: apply all transact items to store ---
+    ddbMock.on(TransactWriteCommand).callsFake((input) => {
+      for (const item of (input.TransactItems ?? [])) {
+        if (item.Update) {
+          const u = item.Update;
+          const tblName = u.TableName as string;
+          const tblStore = store[tblName];
+          if (!tblStore) continue;
+          const keyVal = Object.values(u.Key as Record<string, string>)[0] as string;
+          const existing = tblStore.get(keyVal);
+          if (!existing) continue;
+          const names = (u.ExpressionAttributeNames ?? {}) as Record<string, string>;
+          const vals = (u.ExpressionAttributeValues ?? {}) as Record<string, unknown>;
+          const resolve = (alias: string): string => names[alias] ?? alias;
+          const setMatch = (u.UpdateExpression as string).match(/^SET\s+(.+)$/i);
+          if (setMatch) {
+            for (const assignment of setMatch[1].split(',')) {
+              const m = assignment.trim().match(/([#\w]+)\s*=\s*(:\w+)/);
+              if (m) existing[resolve(m[1])] = vals[m[2]];
+            }
+          }
+          tblStore.set(keyVal, existing);
+        }
+      }
+      return {};
     });
   });
 
