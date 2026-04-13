@@ -5,8 +5,9 @@ import { invokeModel } from '../lib/bedrock';
 
 const bedrockMock = mockClient(BedrockRuntimeClient);
 
-/** Helper: encode a Bedrock JSON response body as Uint8Array */
-function encodeBody(obj: unknown): Uint8Array {
+/** Helper: encode a Bedrock JSON response body as Uint8ArrayBlobAdapter */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function encodeBody(obj: unknown): any {
   return new TextEncoder().encode(JSON.stringify(obj));
 }
 

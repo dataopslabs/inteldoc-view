@@ -128,7 +128,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const req: ApiRequest = {
     method,
     path,
-    pathParams: event.pathParameters ?? {},
+    pathParams: (event.pathParameters as Record<string, string>) ?? {},
     queryParams: (event.queryStringParameters as Record<string, string>) ?? {},
     body,
     context,

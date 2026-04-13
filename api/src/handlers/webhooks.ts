@@ -62,7 +62,7 @@ export async function handleRegisterWebhook(req: ApiRequest): Promise<ApiRespons
   }
 
   const { tenantId, userId } = context;
-  const body = req.body ?? {};
+  const body = (req.body ?? {}) as Record<string, unknown>;
 
   if (!body.url || typeof body.url !== 'string') {
     return { statusCode: 400, body: { error: 'Bad Request', message: '"url" is required' } };
@@ -159,7 +159,10 @@ export async function handleListWebhooks(req: ApiRequest): Promise<ApiResponse> 
   const results = await queryIndex(WEBHOOKS_TABLE, 'tenant-index', 'tenant_id', tenantId);
 
   // Never return signing_secret in list responses
-  const webhooks = results.map(({ signing_secret: _secret, ...rest }) => rest);
+  const webhooks = results.map((item) => {
+    const { signing_secret: _secret, ...rest } = item as Record<string, unknown>;
+    return rest;
+  });
 
   return {
     statusCode: 200,

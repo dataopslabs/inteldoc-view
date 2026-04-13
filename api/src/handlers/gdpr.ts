@@ -72,7 +72,7 @@ export async function handleExportTenantData(req: ApiRequest): Promise<ApiRespon
   // G6-17: Gather ALL owned data in parallel — including webhooks and usage_events
   const [workspaces, webhooks, usageEvents] = await Promise.all([
     queryIndex<Workspace>(TABLE_NAMES.workspaces, 'tenant-index', 'tenant_id', tenantId),
-    queryIndex(TABLE_NAMES.webhooks, 'tenant-index', 'tenant_id', tenantId).catch(() => [] as unknown[]),
+    queryIndex(process.env.WEBHOOKS_TABLE ?? 'docops-webhooks', 'tenant-index', 'tenant_id', tenantId).catch(() => [] as unknown[]),
     queryIndex(TABLE_NAMES.usage, 'tenant-id-index', 'tenant_id', tenantId).catch(() => [] as unknown[]),
   ]);
 

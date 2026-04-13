@@ -65,7 +65,7 @@ export async function authMiddleware(
     const decoded = jwt.decode(token, { complete: true });
     if (!decoded || typeof decoded === 'string') return null;
 
-    const kid = decoded.header.kid;
+    const kid = decoded.header.kid ?? '';
     const signingKey = await getSigningKey(kid);
 
     const payload = jwt.verify(token, signingKey, {

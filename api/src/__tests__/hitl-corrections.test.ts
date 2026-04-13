@@ -41,7 +41,8 @@ const nonOverlappingArb = fc.tuple(
       corrected_value: fc.oneof(fc.string(), fc.integer(), fc.boolean()),
     })
   );
-  return fc.tuple(fc.tuple(...(fields.length ? fields : [fieldArb])), fc.tuple(...(corrections.length ? corrections : [correctionArb])));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return fc.tuple(fc.tuple(...(fields.length ? fields : [fieldArb]) as any[]), fc.tuple(...(corrections.length ? corrections : [correctionArb]) as any[]));
 }).map(([fields, corrections]) => ({ fields: [...fields], corrections: [...corrections] }));
 
 /**
@@ -90,7 +91,7 @@ describe('applyCorrections — Property-Based Tests', () => {
     fc.assert(
       fc.property(nonOverlappingArb, ({ fields, corrections }) => {
         const result = applyCorrections(fields, corrections);
-        const correctedNames = new Set(corrections.map((c) => c.field_name));
+        const correctedNames = new Set<string>(corrections.map((c) => c.field_name as string));
 
         for (let i = 0; i < fields.length; i++) {
           if (!correctedNames.has(fields[i].field_name)) {

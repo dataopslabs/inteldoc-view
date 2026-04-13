@@ -42,6 +42,7 @@ const traceStatusArb = fc.constantFrom('completed', 'failed', 'hitl_required') a
 const traceArb: fc.Arbitrary<Trace> = fc.record({
   trace_id: fc.uuid(),
   workspace_id: fc.constantFrom('ws-1', 'ws-2', 'ws-3'),
+  tenant_id: fc.constant('tenant-test'),
   status: traceStatusArb,
   confidence: fc.option(fc.double({ min: 0, max: 1, noNaN: true }), { nil: undefined }),
   tokens: fc.option(fc.integer({ min: 0, max: 100000 }), { nil: undefined }),
@@ -64,6 +65,7 @@ const agentStepArb = fc.record({
 const traceWithAgentStepsArb: fc.Arbitrary<Trace> = fc.record({
   trace_id: fc.uuid(),
   workspace_id: fc.constantFrom('ws-1', 'ws-2', 'ws-3'),
+  tenant_id: fc.constant('tenant-test'),
   status: traceStatusArb,
   confidence: fc.option(fc.double({ min: 0, max: 1, noNaN: true }), { nil: undefined }),
   tokens: fc.option(fc.integer({ min: 0, max: 100000 }), { nil: undefined }),
@@ -92,6 +94,7 @@ const hitlReviewArb: fc.Arbitrary<HitlReview> = fc.record({
 const failedTraceArb: fc.Arbitrary<Trace> = fc.record({
   trace_id: fc.uuid(),
   workspace_id: fc.constantFrom('ws-1', 'ws-2', 'ws-3'),
+  tenant_id: fc.constant('tenant-test'),
   status: fc.constant('failed') as fc.Arbitrary<Trace['status']>,
   confidence: fc.constant(undefined),
   tokens: fc.constant(undefined),

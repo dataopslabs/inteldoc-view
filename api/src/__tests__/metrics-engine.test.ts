@@ -30,8 +30,8 @@ describe('Metrics Engine Edge Cases', () => {
   // 2. All null confidence: average_confidence is 0
   it('returns average_confidence 0 when all traces have null confidence', () => {
     const traces: Trace[] = [
-      { trace_id: 't1', workspace_id: 'ws1', status: 'completed', confidence: undefined, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-01-15T00:00:00Z' },
-      { trace_id: 't2', workspace_id: 'ws1', status: 'failed', confidence: undefined, tokens: 20, latency: 200, prompt_version: 'v1', created_at: '2024-01-15T01:00:00Z' },
+      { trace_id: 't1', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'completed', confidence: undefined, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-01-15T00:00:00Z' },
+      { trace_id: 't2', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'failed', confidence: undefined, tokens: 20, latency: 200, prompt_version: 'v1', created_at: '2024-01-15T01:00:00Z' },
     ];
     const result = computeDashboardMetrics(traces);
     expect(result.average_confidence).toBe(0);
@@ -41,8 +41,8 @@ describe('Metrics Engine Edge Cases', () => {
   // 3. All null latency: average_latency_ms is 0
   it('returns average_latency_ms 0 when all traces have null latency', () => {
     const traces: Trace[] = [
-      { trace_id: 't1', workspace_id: 'ws1', status: 'completed', confidence: 0.9, tokens: 10, latency: undefined, prompt_version: 'v1', created_at: '2024-01-15T00:00:00Z' },
-      { trace_id: 't2', workspace_id: 'ws1', status: 'completed', confidence: 0.8, tokens: 20, latency: undefined, prompt_version: 'v1', created_at: '2024-01-15T01:00:00Z' },
+      { trace_id: 't1', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'completed', confidence: 0.9, tokens: 10, latency: undefined, prompt_version: 'v1', created_at: '2024-01-15T00:00:00Z' },
+      { trace_id: 't2', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'completed', confidence: 0.8, tokens: 20, latency: undefined, prompt_version: 'v1', created_at: '2024-01-15T01:00:00Z' },
     ];
     const result = computeDashboardMetrics(traces);
     expect(result.average_latency_ms).toBe(0);
@@ -52,8 +52,8 @@ describe('Metrics Engine Edge Cases', () => {
   // 4. No failed traces: error_analysis is empty array
   it('returns empty error_analysis when no traces are failed', () => {
     const traces: Trace[] = [
-      { trace_id: 't1', workspace_id: 'ws1', status: 'completed', confidence: 0.9, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-01-15T00:00:00Z' },
-      { trace_id: 't2', workspace_id: 'ws1', status: 'hitl_required', confidence: 0.5, tokens: 20, latency: 200, prompt_version: 'v1', created_at: '2024-01-15T01:00:00Z' },
+      { trace_id: 't1', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'completed', confidence: 0.9, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-01-15T00:00:00Z' },
+      { trace_id: 't2', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'hitl_required', confidence: 0.5, tokens: 20, latency: 200, prompt_version: 'v1', created_at: '2024-01-15T01:00:00Z' },
     ];
     const result = computeErrorAnalysis(traces);
     expect(result).toEqual([]);
@@ -87,7 +87,7 @@ describe('Metrics Engine Edge Cases', () => {
     const start = new Date('2024-06-15T00:00:00Z');
     const end = new Date('2024-06-15T23:59:59Z');
     const traces: Trace[] = [
-      { trace_id: 't1', workspace_id: 'ws1', status: 'completed', confidence: 0.9, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-06-15T12:00:00Z' },
+      { trace_id: 't1', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'completed', confidence: 0.9, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-06-15T12:00:00Z' },
     ];
     const result = computeTimeSeries(traces, 'daily', start, end);
     expect(result).toHaveLength(1);
@@ -102,8 +102,8 @@ describe('Metrics Engine Edge Cases', () => {
     const end = new Date('2024-02-03T23:59:59Z');
 
     const traces: Trace[] = [
-      { trace_id: 't1', workspace_id: 'ws1', status: 'completed', confidence: 0.9, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-01-29T12:00:00Z' },
-      { trace_id: 't2', workspace_id: 'ws1', status: 'failed', confidence: 0.5, tokens: 20, latency: 200, prompt_version: 'v1', created_at: '2024-02-02T12:00:00Z' },
+      { trace_id: 't1', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'completed', confidence: 0.9, tokens: 10, latency: 100, prompt_version: 'v1', created_at: '2024-01-29T12:00:00Z' },
+      { trace_id: 't2', workspace_id: 'ws1', tenant_id: 'tenant-1', status: 'failed', confidence: 0.5, tokens: 20, latency: 200, prompt_version: 'v1', created_at: '2024-02-02T12:00:00Z' },
     ];
 
     const result = computeTimeSeries(traces, 'weekly', start, end);

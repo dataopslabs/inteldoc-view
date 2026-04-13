@@ -404,7 +404,7 @@ export function computeUsageSummary(
   workspaceCount: number,
   activeSessions: number,
   plan: string,
-  planLimits: { docs_per_month: number; workspaces: number }
+  planLimits: { docs_per_month: number; workspaces: number; tokens_per_month?: number; chats_per_month?: number }
 ): UsageSummary {
   let total_tokens_consumed = 0;
   for (const t of traces) {
@@ -417,6 +417,11 @@ export function computeUsageSummary(
     workspace_count: workspaceCount,
     active_sessions_count: activeSessions,
     plan,
-    plan_limits: planLimits,
+    plan_limits: {
+      docs_per_month: planLimits.docs_per_month,
+      workspaces: planLimits.workspaces,
+      tokens_per_month: planLimits.tokens_per_month ?? 0,
+      chats_per_month: planLimits.chats_per_month ?? 0,
+    },
   };
 }

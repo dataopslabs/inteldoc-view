@@ -112,7 +112,7 @@ export async function handleListReviews(req: ApiRequest): Promise<ApiResponse> {
       nextToken
     );
     // Filter to this tenant's reviews only — prevents multi-tenant data leak
-    reviews = result.items.filter(r => r.tenant_id === tenant.tenant_id);
+    reviews = result.items.filter(r => (r as any).tenant_id === tenant.tenant_id);
     responseNextToken = result.nextToken;
   } else {
     // T1-01: No filters — query tenant-index to return all reviews for this tenant
@@ -226,7 +226,7 @@ export async function handleAssignReview(req: ApiRequest): Promise<ApiResponse> 
         }),
         Time: new Date(),
       }],
-    })).catch((err) => console.error('[hitl] EventBridge publish failed:', err));
+    })).catch((err: unknown) => console.error('[hitl] EventBridge publish failed:', err));
 
     // G6-14: Audit the assignment
     auditLog(tenant.tenant_id, req.context.userId, 'hitl.assigned', {
