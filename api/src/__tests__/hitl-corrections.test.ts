@@ -89,9 +89,12 @@ describe('applyCorrections — Property-Based Tests', () => {
    */
   it('Property 1: uncorrected fields retain original value and confidence', () => {
     fc.assert(
-      fc.property(nonOverlappingArb, ({ fields, corrections }) => {
-        const result = applyCorrections(fields, corrections);
-        const correctedNames = new Set<string>(corrections.map((c) => c.field_name as string));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fc.property(nonOverlappingArb, ({ fields: rawFields, corrections: rawCorrections }) => {
+        const fields = rawFields as Array<{ field_name: string; value: unknown; confidence: number }>;
+        const corrections = rawCorrections as Array<{ field_name: string; original_value: unknown; corrected_value: unknown }>;
+        const result = applyCorrections(fields, corrections as import('../models/types').Correction[]);
+        const correctedNames = new Set<string>(corrections.map((c) => c.field_name));
 
         for (let i = 0; i < fields.length; i++) {
           if (!correctedNames.has(fields[i].field_name)) {
