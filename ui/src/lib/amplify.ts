@@ -3,7 +3,8 @@ import { Amplify } from 'aws-amplify';
 export function configureAmplify() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
-  const cognitoConfig: Record<string, unknown> = {
+  // Type cast needed: Amplify config shape varies by optional fields
+  const cognitoConfig: any = {
     userPoolId: process.env.NEXT_PUBLIC_USER_POOL_ID!,
     userPoolClientId: process.env.NEXT_PUBLIC_USER_POOL_CLIENT_ID!,
     loginWith: {
