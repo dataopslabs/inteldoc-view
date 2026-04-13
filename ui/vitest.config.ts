@@ -7,6 +7,12 @@ export default defineConfig({
   test: {
     root: uiRoot,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    coverage: {
+      thresholds: {
+        lines: 70,
+        functions: 70,
+      },
+    },
   },
   resolve: {
     alias: {

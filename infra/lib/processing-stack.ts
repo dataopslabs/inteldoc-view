@@ -95,7 +95,7 @@ export class ProcessingStack extends cdk.Stack {
 
     // Python processor Lambda (Phase 2 — document processing pipeline)
     // Dependencies are pre-installed in services/processor/ — skip Docker bundling.
-    const servicesDir = path.resolve(__dirname, '..', '..', 'services');
+    const servicesDir = path.resolve(process.cwd(), '..', 'services');
     this.processorFunction = new lambda.Function(this, 'ProcessorFunction', {
       functionName: 'docops-processor',
       runtime: lambda.Runtime.PYTHON_3_11,

@@ -310,7 +310,7 @@ function RegisterForm({ onRegistered }: { onRegistered: (webhook: WebhookRegistr
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedEvents, setSelectedEvents] = useState<Set<WebhookEvent>>(new Set(['trace.completed']));
+  const [selectedEvents, setSelectedEvents] = useState<Set<WebhookEvent>>(new Set<WebhookEvent>(['trace.completed']));
   const [submitting, setSubmitting] = useState(false);
   const [urlError, setUrlError] = useState('');
 
