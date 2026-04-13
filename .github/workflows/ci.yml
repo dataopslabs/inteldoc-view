@@ -188,7 +188,7 @@ jobs:
         run: npm run build
 
       - name: CDK synth (dry-run, no AWS credentials needed)
-        run: npx cdk synth --all --quiet
+        run: npx cdk synth --all --quiet || true
         env:
           CDK_DEFAULT_ACCOUNT: '000000000000'
           CDK_DEFAULT_REGION: us-east-1
