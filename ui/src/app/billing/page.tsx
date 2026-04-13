@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Header from '@/components/Header';
-import Skeleton from '@/components/Skeleton';
-import ErrorBoundary from '@/components/ErrorBoundary';
+import { Skeleton } from '@/components/Skeleton';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useToast } from '@/components/ToastProvider';
 import { useAuth } from '@/components/AuthProvider';
 import { api, BillingPlan, PlanChangeResponse } from '@/lib/api';
@@ -365,7 +365,7 @@ function ConfirmDialog({
 // ── Main Component ──────────────────────────────────────────────────────────
 
 function BillingContent() {
-  const { addToast } = useToast();
+  const { showToast } = useToast();
   const { user } = useAuth();
 
   const [billingData, setBillingData] = useState<BillingPlan | null>(null);
@@ -401,16 +401,16 @@ function BillingContent() {
     setChangingPlan(true);
     try {
       const result: PlanChangeResponse = await api.billing.changePlan(confirmTarget);
-      addToast({
-        type: 'success',
-        message: result.upgrade
+      showToast(
+        result.upgrade
           ? `Successfully upgraded to ${result.plan}!`
           : `Scheduled downgrade to ${result.plan}${result.downgrade_at ? ` on ${new Date(result.downgrade_at).toLocaleDateString()}` : ''}.`,
-      });
+        'success'
+      );
       await fetchPlan();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to change plan';
-      addToast({ type: 'error', message: msg });
+      showToast(msg, 'error');
     } finally {
       setChangingPlan(false);
       setConfirmTarget(null);
@@ -582,7 +582,7 @@ export default function BillingPage() {
         fontFamily: 'Inter, system-ui, sans-serif',
       }}
     >
-      <Header />
+      <Header title="Billing" />
       <main
         style={{
           maxWidth: '1100px',

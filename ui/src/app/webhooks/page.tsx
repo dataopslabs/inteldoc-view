@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Header from '@/components/Header';
-import Skeleton from '@/components/Skeleton';
-import ErrorBoundary from '@/components/ErrorBoundary';
+import { Skeleton } from '@/components/Skeleton';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useToast } from '@/components/ToastProvider';
 import { api, WebhookRegistration, WebhookEvent } from '@/lib/api';
 
@@ -306,7 +306,7 @@ function SigningSecretModal({
 // ── Register Form ───────────────────────────────────────────────────────────
 
 function RegisterForm({ onRegistered }: { onRegistered: (webhook: WebhookRegistration) => void }) {
-  const { addToast } = useToast();
+  const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
@@ -350,7 +350,7 @@ function RegisterForm({ onRegistered }: { onRegistered: (webhook: WebhookRegistr
       return;
     }
     if (selectedEvents.size === 0) {
-      addToast({ type: 'error', message: 'Select at least one event to subscribe to.' });
+      showToast('Select at least one event to subscribe to.', 'error');
       return;
     }
 
@@ -365,11 +365,11 @@ function RegisterForm({ onRegistered }: { onRegistered: (webhook: WebhookRegistr
       // Reset form
       setUrl('');
       setDescription('');
-      setSelectedEvents(new Set(['trace.completed']));
+      setSelectedEvents(new Set<WebhookEvent>(['trace.completed']));
       setOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to register webhook';
-      addToast({ type: 'error', message: msg });
+      showToast(msg, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -551,7 +551,7 @@ function RegisterForm({ onRegistered }: { onRegistered: (webhook: WebhookRegistr
 // ── Main Component ──────────────────────────────────────────────────────────
 
 function WebhooksContent() {
-  const { addToast } = useToast();
+  const { showToast } = useToast();
 
   const [webhooks, setWebhooks] = useState<WebhookRegistration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -582,7 +582,7 @@ function WebhooksContent() {
     if (webhook.signing_secret) {
       setNewSecret(webhook.signing_secret);
     } else {
-      addToast({ type: 'success', message: 'Webhook registered successfully.' });
+      showToast('Webhook registered successfully.', 'success');
     }
   };
 
@@ -591,10 +591,10 @@ function WebhooksContent() {
     try {
       await api.webhooks.delete(webhookId);
       setWebhooks((prev) => prev.filter((w) => w.webhook_id !== webhookId));
-      addToast({ type: 'success', message: 'Webhook deleted.' });
+      showToast('Webhook deleted.', 'success');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to delete webhook';
-      addToast({ type: 'error', message: msg });
+      showToast(msg, 'error');
     } finally {
       setDeletingId(null);
     }
@@ -677,7 +677,7 @@ function WebhooksContent() {
           secret={newSecret}
           onClose={() => {
             setNewSecret(null);
-            addToast({ type: 'success', message: 'Webhook registered. Remember to save the signing secret!' });
+            showToast('Webhook registered. Remember to save the signing secret!', 'success');
           }}
         />
       )}
@@ -697,7 +697,7 @@ export default function WebhooksPage() {
         fontFamily: 'Inter, system-ui, sans-serif',
       }}
     >
-      <Header />
+      <Header title="Webhooks" />
       <main
         style={{
           maxWidth: '900px',
