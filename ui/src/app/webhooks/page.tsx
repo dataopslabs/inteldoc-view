@@ -295,7 +295,7 @@ function SigningSecretModal({
               cursor: 'pointer',
             }}
           >
-            I've saved the secret
+            I&apos;ve saved the secret
           </button>
         </div>
       </div>

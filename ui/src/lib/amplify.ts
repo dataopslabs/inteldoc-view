@@ -3,8 +3,7 @@ import { Amplify } from 'aws-amplify';
 export function configureAmplify() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cognitoConfig: any = {
+  const cognitoConfig: Record<string, unknown> = {
     userPoolId: process.env.NEXT_PUBLIC_USER_POOL_ID!,
     userPoolClientId: process.env.NEXT_PUBLIC_USER_POOL_CLIENT_ID!,
     loginWith: {

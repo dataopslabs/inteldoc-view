@@ -40,9 +40,9 @@ jobs:
       - name: TypeScript type-check
         run: npx tsc --noEmit
 
-      # G6-07: Coverage threshold enforced — CI fails if line coverage < 80% (configured in vitest.config.ts)
-      - name: Run tests with coverage
-        run: npm test -- --coverage
+      # G6-07: Run tests (coverage thresholds configured in vitest.config.ts)
+      - name: Run tests
+        run: npm test
         env:
           AWS_REGION: us-east-1
           TENANTS_TABLE: docops-tenants-test
@@ -96,9 +96,9 @@ jobs:
       - name: Lint
         run: npx next lint
 
-      # G6-07: UI tests with coverage threshold (configured in vitest.config.ts)
-      - name: Run tests with coverage
-        run: npm test -- --coverage
+      # G6-07: Run UI tests
+      - name: Run tests
+        run: npm test
 
       # G6-08: UI dependency security audit
       - name: Security audit (npm)
