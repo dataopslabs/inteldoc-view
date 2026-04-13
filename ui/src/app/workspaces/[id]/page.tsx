@@ -149,9 +149,37 @@ export default function WorkspaceDetailPage() {
               Prompt <span style={{ color: '#d0d6e0' }}>v{workspace.prompt_version}</span>
             </div>
             <div className="text-xs" style={{ color: '#62666d' }}>
-              HITL threshold <span style={{ color: '#d0d6e0' }}>{workspace.hitl_threshold}</span>
+              HITL <span style={{ color: '#d0d6e0' }}>{workspace.hitl_threshold}</span>
             </div>
-            {/* T4-04: Show document count */}
+            {/* Schema field count indicator */}
+            {(() => {
+              const schema = (workspace as any).schema;
+              if (!schema) return (
+                <div className="text-xs" style={{ color: '#62666d' }}>
+                  Schema <span style={{ color: '#8a8f98' }}>not set</span>
+                </div>
+              );
+              const fields = schema.fields ?? schema.properties ?? schema;
+              const count = typeof fields === 'object' ? Object.keys(fields).length : 0;
+              const names = typeof fields === 'object' ? Object.keys(fields).slice(0, 3).join(', ') : '';
+              return (
+                <div className="text-xs flex items-center gap-1.5" style={{ color: '#62666d' }}>
+                  Schema
+                  <span
+                    className="px-1.5 py-0.5 rounded text-xs"
+                    style={{ backgroundColor: 'rgba(94,106,210,0.15)', color: '#7170ff' }}
+                    title={names}
+                  >
+                    {count} field{count !== 1 ? 's' : ''}
+                  </span>
+                  {names && (
+                    <span className="truncate max-w-[160px]" style={{ color: '#8a8f98' }} title={Object.keys(fields).join(', ')}>
+                      {names}{count > 3 ? ` +${count - 3}` : ''}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
             <div className="text-xs" style={{ color: '#62666d' }}>
               Docs <span style={{ color: '#d0d6e0' }}>{docCount}</span>
             </div>

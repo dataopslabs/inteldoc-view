@@ -14,6 +14,14 @@ const STATUS_COLORS: Record<string, string> = {
   hitl_required: '#7170ff',
 };
 
+// Canonical pipeline step definitions
+const PIPELINE_STEPS: { key: string; label: string }[] = [
+  { key: 's3_download', label: 'Download' },
+  { key: 'docling', label: 'Parse' },
+  { key: 'llm_reasoning', label: 'Reason' },
+  { key: 'reconciliation', label: 'Reconcile' },
+];
+
 function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   const color = value >= 0.8 ? '#27a644' : value >= 0.5 ? '#f59e0b' : '#ef4444';
@@ -80,6 +88,137 @@ function FieldRow({ field }: { field: FieldResult }) {
   );
 }
 
+function AgentPipeline({ trace }: { trace: Trace }) {
+  const completedSteps = new Set(trace.agent_steps ?? []);
+  const isProcessing = trace.status === 'processing' || trace.status === 'pending';
+  const isFailed = trace.status === 'failed' || completedSteps.has('error');
+  const isHitl = trace.status === 'hitl_required' || completedSteps.has('hitl_flagged');
+
+  // Determine the last completed canonical step index for progress tracking
+  let lastCompletedIdx = -1;
+  for (let i = PIPELINE_STEPS.length - 1; i >= 0; i--) {
+    if (completedSteps.has(PIPELINE_STEPS[i].key)) {
+      lastCompletedIdx = i;
+      break;
+    }
+  }
+
+  return (
+    <div className="mb-8">
+      <h3 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: '#62666d' }}>
+        Agent pipeline
+      </h3>
+      <div className="flex items-start gap-0">
+        {PIPELINE_STEPS.map((step, i) => {
+          const done = completedSteps.has(step.key);
+          const isNext = !done && isProcessing && i === lastCompletedIdx + 1;
+          const skipped = !done && !isNext && i <= lastCompletedIdx;
+
+          const dotColor = done ? '#27a644'
+            : isNext ? '#f59e0b'
+            : isFailed && i === lastCompletedIdx + 1 ? '#ef4444'
+            : '#28282c';
+
+          const lineColor = done && i < PIPELINE_STEPS.length - 1
+            ? (completedSteps.has(PIPELINE_STEPS[i + 1]?.key) ? '#27a644' : 'rgba(255,255,255,0.08)')
+            : 'rgba(255,255,255,0.08)';
+
+          const textColor = done ? '#27a644'
+            : isNext ? '#f59e0b'
+            : isFailed && i === lastCompletedIdx + 1 ? '#ef4444'
+            : '#62666d';
+
+          return (
+            <div key={step.key} className="flex items-start">
+              <div className="flex flex-col items-center">
+                <div
+                  className={`w-2.5 h-2.5 rounded-full ${isNext ? 'animate-pulse' : ''}`}
+                  style={{ backgroundColor: dotColor }}
+                />
+                <span
+                  className="text-center whitespace-nowrap mt-1"
+                  style={{ color: textColor, fontSize: '10px' }}
+                >
+                  {done ? '✓ ' : skipped ? '' : ''}{step.label}
+                </span>
+              </div>
+              {i < PIPELINE_STEPS.length - 1 && (
+                <div
+                  className="mt-1 mx-1"
+                  style={{ width: '32px', height: '1px', backgroundColor: lineColor, marginTop: '5px' }}
+                />
+              )}
+            </div>
+          );
+        })}
+
+        {/* Terminal node: HITL or Completed */}
+        {(isHitl || trace.status === 'completed') && (
+          <>
+            <div
+              className="mt-1 mx-1"
+              style={{ width: '32px', height: '1px', backgroundColor: isHitl ? '#7170ff' : '#27a644', marginTop: '5px' }}
+            />
+            <div className="flex flex-col items-center">
+              <div
+                className="w-2.5 h-2.5 rounded-full"
+                style={{ backgroundColor: isHitl ? '#7170ff' : '#27a644' }}
+              />
+              <span
+                className="text-center whitespace-nowrap mt-1"
+                style={{ color: isHitl ? '#7170ff' : '#27a644', fontSize: '10px' }}
+              >
+                {isHitl ? 'HITL review' : '✓ Done'}
+              </span>
+            </div>
+          </>
+        )}
+
+        {/* Failed terminal */}
+        {isFailed && (
+          <>
+            <div
+              className="mt-1 mx-1"
+              style={{ width: '32px', height: '1px', backgroundColor: '#ef4444', marginTop: '5px' }}
+            />
+            <div className="flex flex-col items-center">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#ef4444' }} />
+              <span className="text-center whitespace-nowrap mt-1" style={{ color: '#ef4444', fontSize: '10px' }}>
+                Error
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Step list with timestamps if available */}
+      {trace.agent_steps && trace.agent_steps.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {trace.agent_steps.map((step) => (
+            <span
+              key={step}
+              className="text-xs px-2 py-0.5 rounded font-mono"
+              style={{
+                backgroundColor: step === 'error' ? 'rgba(239,68,68,0.1)'
+                  : step === 'hitl_flagged' ? 'rgba(113,112,255,0.1)'
+                  : 'rgba(39,166,68,0.08)',
+                color: step === 'error' ? '#ef4444'
+                  : step === 'hitl_flagged' ? '#7170ff'
+                  : '#27a644',
+                border: `1px solid ${step === 'error' ? 'rgba(239,68,68,0.2)'
+                  : step === 'hitl_flagged' ? 'rgba(113,112,255,0.2)'
+                  : 'rgba(39,166,68,0.15)'}`,
+              }}
+            >
+              {step}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TraceDetailPage() {
   const { trace_id } = useParams<{ trace_id: string }>();
   const router = useRouter();
@@ -115,13 +254,7 @@ export default function TraceDetailPage() {
   const confidence = trace.confidence ? parseFloat(trace.confidence) : null;
   const statusColor = STATUS_COLORS[trace.status] ?? '#62666d';
   const conflicts = trace.fields?.filter((f) => f.conflict).length ?? 0;
-
-  const WORKFLOW_STATES = [
-    'submitted', 'downloading', 'parsing', 'reasoning',
-    'reconciling', 'validating', 'hitl_pending', 'completed',
-  ];
-  const currentStateIdx = WORKFLOW_STATES.indexOf(trace.workflow_state ?? '');
-  const isFailed = trace.workflow_state === 'failed';
+  const hasAgentSteps = trace.agent_steps && trace.agent_steps.length > 0;
 
   return (
     <div className="flex flex-col min-h-screen" style={{ backgroundColor: '#08090a' }}>
@@ -164,79 +297,8 @@ export default function TraceDetailPage() {
           ))}
         </div>
 
-        {/* Workflow state machine timeline */}
-        {trace.workflow_state && (
-          <div className="mb-8">
-            <h3 className="text-xs font-medium uppercase tracking-wider mb-4" style={{ color: '#62666d' }}>
-              Workflow pipeline
-            </h3>
-            <div className="flex items-center gap-0 flex-wrap">
-              {WORKFLOW_STATES.filter(s => s !== 'hitl_pending').map((state, i, arr) => {
-                const isActive = state === trace.workflow_state;
-                const isPast = currentStateIdx > i && !isFailed;
-                const isHitl = trace.workflow_state === 'hitl_pending' && state === 'validating';
-                const stateColor = isFailed && isActive ? '#ef4444'
-                  : isPast ? '#27a644'
-                  : isActive ? '#7170ff'
-                  : '#28282c';
-                const textColor = isFailed && isActive ? '#ef4444'
-                  : isPast ? '#27a644'
-                  : isActive ? '#7170ff'
-                  : '#62666d';
-                return (
-                  <div key={state} className="flex items-center">
-                    <div className="flex flex-col items-center">
-                      <div
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: stateColor }}
-                      />
-                      <span className="text-xs mt-1 whitespace-nowrap" style={{ color: textColor, fontSize: '10px' }}>
-                        {state}
-                      </span>
-                    </div>
-                    {i < arr.length - 1 && (
-                      <div
-                        className="w-8 h-px mb-3 mx-1"
-                        style={{ backgroundColor: isPast ? '#27a644' : 'rgba(255,255,255,0.08)' }}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-              {trace.workflow_state === 'hitl_pending' && (
-                <div className="flex items-center ml-2">
-                  <div className="w-8 h-px mb-3" style={{ backgroundColor: '#7170ff' }} />
-                  <div className="flex flex-col items-center">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#7170ff' }} />
-                    <span className="text-xs mt-1 whitespace-nowrap" style={{ color: '#7170ff', fontSize: '10px' }}>
-                      hitl_pending
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Workflow step timing */}
-            {trace.workflow_steps && trace.workflow_steps.length > 0 && (
-              <div className="mt-4 space-y-1">
-                {trace.workflow_steps.map((step, i) => (
-                  <div key={i} className="flex items-center gap-3 text-xs">
-                    <span className="font-mono w-20 text-right" style={{ color: '#62666d' }}>
-                      {step.from}
-                    </span>
-                    <span style={{ color: '#28282c' }}>→</span>
-                    <span className="font-mono w-20" style={{ color: '#8a8f98' }}>
-                      {step.to}
-                    </span>
-                    <span style={{ color: '#62666d' }}>
-                      {new Date(step.at).toLocaleTimeString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Agent pipeline — shown when agent_steps is populated */}
+        {hasAgentSteps && <AgentPipeline trace={trace} />}
 
         {/* Validation errors */}
         {trace.validation_errors && trace.validation_errors.length > 0 && (
