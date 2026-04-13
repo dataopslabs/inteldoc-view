@@ -1,5 +1,5 @@
 {
-  "app": "node dist/app.js",
+  "app": "node dist/bin/app.js",
   "watch": {
     "include": ["**"],
     "exclude": [

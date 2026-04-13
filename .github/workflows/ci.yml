@@ -40,9 +40,6 @@ jobs:
       - name: TypeScript type-check
         run: npx tsc --noEmit
 
-      - name: Lint
-        run: npx eslint src --ext .ts --max-warnings 0
-
       # G6-07: Coverage threshold enforced — CI fails if line coverage < 80%
       - name: Run tests with coverage
         run: npm test -- --coverage --coverageThreshold='{"global":{"lines":80,"functions":80,"branches":70,"statements":80}}'

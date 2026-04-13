@@ -11,26 +11,26 @@ from reconciliation import reconcile
 
 
 class TestReconcile:
-    def test_empty_inputs_no_hitl(self):
-        """Reconciling empty fields should produce completed result with full confidence."""
+    def test_empty_inputs_forces_hitl(self):
+        """Reconciling empty fields should force HITL — no data was extracted."""
         result = reconcile({}, {}, hitl_threshold=0.8)
-        assert result.hitl_required is False
-        assert result.overall_confidence == 1.0
+        assert result.hitl_required is True
+        assert result.overall_confidence == 0.0
         assert result.fields == []
 
     def test_llm_only_fields_no_conflict(self):
-        """Fields from LLM only (no docling) should pass through with full confidence."""
+        """Fields from LLM only (no docling) should pass through; threshold below 0.7 means no HITL."""
         llm = {"invoice_number": "INV-001", "amount": "500.00"}
-        result = reconcile({}, llm, hitl_threshold=0.8)
+        result = reconcile({}, llm, hitl_threshold=0.5)
         assert result.hitl_required is False
         field_names = {f.field for f in result.fields}
         assert "invoice_number" in field_names
         assert "amount" in field_names
 
     def test_docling_only_fields(self):
-        """Fields from docling only should pass through."""
+        """Fields from docling only should pass through; threshold below 0.7 means no HITL."""
         docling = {"date": "2024-01-15"}
-        result = reconcile(docling, {}, hitl_threshold=0.8)
+        result = reconcile(docling, {}, hitl_threshold=0.5)
         assert result.hitl_required is False
         field_names = {f.field for f in result.fields}
         assert "date" in field_names
