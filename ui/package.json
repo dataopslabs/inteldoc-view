@@ -27,7 +27,7 @@
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
-    "eslint-config-next": "14.2.3",
+    "eslint-config-next": "16.2.3",
     "@vitest/coverage-v8": "^1.6.1",
     "fast-check": "^3.23.2",
     "postcss": "^8",
